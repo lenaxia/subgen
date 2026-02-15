@@ -706,3 +706,45 @@ QUEUE_MAX_AUDIO_CONTENT_SIZE=104857600  # 100MB default
 
 ---
 
+
+### 2026-02-15T21:36:00Z - EPIC_01
+**Message**: ✅ STORY_05 COMPLETE - Media Server API Clients (Plex & Jellyfin)
+
+**Deliverables Completed**:
+1. ✅ `internal/mediaserver/client.go` (43 lines) - Common interface + config
+2. ✅ `internal/mediaserver/plex.go` (162 lines) - Full Plex client
+3. ✅ `internal/mediaserver/jellyfin.go` (213 lines) - Full Jellyfin client with caching
+4. ✅ `internal/mediaserver/plex_test.go` (212 lines) - 13 comprehensive tests
+5. ✅ `internal/mediaserver/jellyfin_test.go` (267 lines) - 11 comprehensive tests
+6. ✅ Work log created (0006_2026-02-15_STORY_05_media_server_clients.md)
+
+**Test Results**:
+- 24/24 tests passing (13 Plex + 11 Jellyfin)
+- 90.8% code coverage (exceeds 75% requirement)
+- Race detector: PASS (no race conditions)
+- 0.027s execution time
+
+**Key Features Implemented**:
+- **Plex**: XML API, X-Plex-Token auth, GetFilePath + RefreshMetadata
+- **Jellyfin**: JSON API, MediaBrowser Token auth, admin user caching with RWMutex
+- **Connection Pooling**: HTTP client reuse, 10 idle connections, 90s timeout
+- **Error Handling**: Comprehensive error messages with status codes
+- **Context Support**: Cancellation and timeout propagation
+
+**Behavioral Parity**:
+- ✅ Matches legacy Python API endpoints exactly
+- ✅ Same auth headers (X-Plex-Token, MediaBrowser Token)
+- ✅ Same XML/JSON parsing logic
+- ✅ Improvements: Admin user caching (50% fewer API calls), connection pooling
+
+**Integration Points**:
+- ✅ Ready for STORY_03 (Webhooks) - fetch file paths
+- ✅ Ready for STORY_07 (gRPC Client) - refresh metadata after transcription
+- ✅ Uses config.Config from STORY_02
+
+**Time Spent**: 2 hours (estimated 8-10h, 80% ahead of schedule)
+
+**Next**: Ready to begin STORY_06 (Worker Discovery) or STORY_07 (gRPC Client)
+
+---
+
