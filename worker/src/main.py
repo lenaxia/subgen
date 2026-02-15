@@ -9,6 +9,7 @@ performs audio transcription using faster-whisper.
 import logging
 import signal
 import sys
+import time
 from concurrent import futures
 from typing import NoReturn
 
@@ -35,8 +36,11 @@ def serve() -> NoReturn:
     logger.info(f"Whisper model: {config.whisper_model}")
     logger.info(f"Device: {config.device}")
 
-    # Create gRPC server
-    server = create_grpc_server(config)
+    # Create gRPC server and servicer
+    server, servicer = create_grpc_server(config)
+
+    # Set servicer start time for uptime calculation
+    servicer.start_time = time.time()
 
     # Bind to port
     server_address = f"{config.grpc_host}:{config.grpc_port}"
@@ -61,6 +65,9 @@ def serve() -> NoReturn:
     except KeyboardInterrupt:
         logger.info("Interrupted by user, shutting down...")
         server.stop(grace=30)
+
+    # This should never be reached, but satisfy type checker
+    sys.exit(0)
 
 
 def main() -> None:
