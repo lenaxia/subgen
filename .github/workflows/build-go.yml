@@ -1,0 +1,129 @@
+name: Build Go Orchestrator
+
+on:
+  push:
+    branches: [main]
+    paths:
+      - 'orchestrator/**'
+      - 'api/**'
+      - '.github/workflows/build-go.yml'
+  pull_request:
+    branches: [main]
+    paths:
+      - 'orchestrator/**'
+      - 'api/**'
+      - '.github/workflows/build-go.yml'
+  workflow_dispatch:
+
+jobs:
+  test:
+    name: Test
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Download dependencies
+        working-directory: ./orchestrator
+        run: go mod download
+
+      - name: Verify dependencies
+        working-directory: ./orchestrator
+        run: go mod verify
+
+      - name: Run tests
+        working-directory: ./orchestrator
+        run: go test -v -race -coverprofile=coverage.out ./...
+
+      - name: Generate coverage report
+        working-directory: ./orchestrator
+        run: go tool cover -html=coverage.out -o coverage.html
+
+      - name: Upload coverage
+        uses: actions/upload-artifact@v4
+        with:
+          name: coverage-report
+          path: orchestrator/coverage.html
+
+  build:
+    name: Build
+    runs-on: ubuntu-latest
+    needs: test
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Build orchestrator
+        working-directory: ./orchestrator
+        run: |
+          go build -v -o bin/orchestrator \
+            -ldflags "-X main.Version=${{ github.ref_name }} -X main.BuildTime=$(date -u +%Y-%m-%dT%H:%M:%SZ) -X main.GitCommit=${{ github.sha }}" \
+            ./cmd/orchestrator
+
+      - name: Verify ldflags in binary
+        working-directory: ./orchestrator
+        run: |
+          VERSION_OUTPUT=$(./bin/orchestrator --version)
+          echo "Version output:"
+          echo "$VERSION_OUTPUT"
+          
+          # Verify that BuildTime is not "unknown"
+          if echo "$VERSION_OUTPUT" | grep -q "Build Time: unknown"; then
+            echo "ERROR: BuildTime was not set via ldflags"
+            exit 1
+          fi
+          
+          # Verify that GitCommit is not "unknown"
+          if echo "$VERSION_OUTPUT" | grep -q "Git Commit: unknown"; then
+            echo "ERROR: GitCommit was not set via ldflags"
+            exit 1
+          fi
+          
+          echo "✓ ldflags verification passed"
+
+      - name: Test binary
+        working-directory: ./orchestrator
+        run: |
+          ./bin/orchestrator --version || true
+          file bin/orchestrator
+
+      - name: Upload binary
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrator-binary
+          path: orchestrator/bin/orchestrator
+
+  lint:
+    name: Lint
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: '1.25'
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: golangci-lint
+        uses: golangci/golangci-lint-action@v6
+        with:
+          version: latest
+          working-directory: orchestrator
+          args: --timeout=5m

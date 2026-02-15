@@ -1,0 +1,273 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/app-template-4.6.2/charts/other/app-template/values.schema.json
+
+# ============================================================================
+# Subgen - Kubernetes Deployment (Phase 1: Single Pod)
+# ============================================================================
+# Chart: bjw-s/app-template v4.6.2+
+# Deployment: 2 containers in 1 pod (orchestrator + worker)
+# ============================================================================
+
+# ============================================================================
+# Global Pod Configuration
+# ============================================================================
+defaultPodOptions:
+  automountServiceAccountToken: false  # Not needed in Phase 1
+  
+  securityContext:
+    fsGroup: 568  # Media server user
+    fsGroupChangePolicy: "OnRootMismatch"
+  
+  annotations:
+    reloader.stakater.com/auto: "true"  # Auto-reload on ConfigMap/Secret change
+
+# ============================================================================
+# Controllers
+# ============================================================================
+controllers:
+  main:
+    type: deployment
+    replicas: 1
+    strategy: Recreate  # Clean shutdown before new pod starts
+    
+    containers:
+      # ──────────────────────────────────────────────────────────────────
+      # Go Orchestrator Container
+      # ──────────────────────────────────────────────────────────────────
+      orchestrator:
+        image:
+          repository: ghcr.io/your-username/subgen-orchestrator
+          tag: "latest"  # IMPORTANT: Change to specific version in production (e.g., "1.0.0")
+          pullPolicy: Always
+        
+        env:
+          # Orchestrator config
+          WEBHOOK_PORT: "9000"
+          METRICS_PORT: "9090"
+          LOG_LEVEL: "info"
+          LOG_FORMAT: "json"
+          
+          # Worker discovery (Phase 1: localhost)
+          WORKER_DISCOVERY: "localhost"
+          PYTHON_WORKER_ADDRESS: "localhost:50051"
+          
+          # Queue config
+          QUEUE_MAX_SIZE: "1000"
+          QUEUE_WORKER_TIMEOUT: "18000"  # 5 hours
+          
+          # Processing flags
+          PROCESS_ADDED_MEDIA: "true"
+          PROCESS_MEDIA_ON_PLAY: "false"
+          TRANSCRIBE_OR_TRANSLATE: "transcribe"
+          
+          # Skip conditions
+          SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE: "eng"
+          SKIP_IF_TARGET_SUBTITLES_EXIST: "true"
+          
+          # Plex config (update to match your setup)
+          PLEX_SERVER: "http://plex.media.svc.cluster.local:32400"
+          PLEX_QUEUE_NEXT_EPISODE: "false"
+          
+          # Jellyfin config (update to match your setup)
+          JELLYFIN_SERVER: "http://jellyfin.media.svc.cluster.local:8096"
+        
+        envFrom:
+          - secretRef:
+              name: subgen-secrets  # PLEX_TOKEN, JELLYFIN_TOKEN
+        
+        ports:
+          - name: http
+            containerPort: 9000
+            protocol: TCP
+          - name: metrics
+            containerPort: 9090
+            protocol: TCP
+        
+        probes:
+          liveness:
+            enabled: true
+            type: HTTP
+            path: /health
+            port: 9000
+            spec:
+              initialDelaySeconds: 10
+              periodSeconds: 30
+              timeoutSeconds: 5
+              failureThreshold: 3
+          
+          readiness:
+            enabled: true
+            type: HTTP
+            path: /health
+            port: 9000
+            spec:
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              timeoutSeconds: 3
+        
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 100m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+      
+      # ──────────────────────────────────────────────────────────────────
+      # Python Worker Container
+      # ──────────────────────────────────────────────────────────────────
+      worker:
+        dependsOn: orchestrator  # Start orchestrator first
+        
+        image:
+          repository: ghcr.io/your-username/subgen-worker
+          tag: "latest"  # IMPORTANT: Change to specific version in production
+          pullPolicy: Always
+        
+        env:
+          # Worker config
+          GRPC_PORT: "50051"
+          LOG_LEVEL: "info"
+          LOG_FORMAT: "json"
+          
+          # Whisper config
+          WHISPER_MODEL: "medium"  # Options: tiny, base, small, medium, large, large-v3
+          WHISPER_THREADS: "4"
+          TRANSCRIBE_DEVICE: "cpu"  # Options: cpu, cuda
+          COMPUTE_TYPE: "auto"  # Options: int8, int8_float16, float16, float32, auto
+          MODEL_PATH: "/models"
+          
+          # Memory management
+          MEMORY_THRESHOLD_MB: "3000"
+          MODEL_CLEANUP_DELAY: "30"
+          CLEAR_VRAM_ON_COMPLETE: "true"
+          
+          # Subtitle config
+          WORD_LEVEL_HIGHLIGHT: "false"
+          CUSTOM_REGROUP: "cm_sl=84_sl=42++++++1"
+          LRC_FOR_AUDIO_FILES: "true"
+          APPEND: "false"
+          SUBTITLE_LANGUAGE_NAME: "aa"
+          
+          # Cache directories
+          XDG_CACHE_HOME: "/cache"
+          HF_HOME: "/cache/huggingface"
+          MPLCONFIGDIR: "/cache/matplotlib"
+        
+        ports:
+          - name: grpc
+            containerPort: 50051
+            protocol: TCP
+        
+        probes:
+          liveness:
+            enabled: true
+            type: GRPC
+            port: 50051
+            spec:
+              initialDelaySeconds: 60
+              periodSeconds: 60
+              timeoutSeconds: 10
+              failureThreshold: 3
+          
+          readiness:
+            enabled: true
+            type: GRPC
+            port: 50051
+            spec:
+              initialDelaySeconds: 30
+              periodSeconds: 30
+              timeoutSeconds: 5
+          
+          startup:
+            enabled: true
+            type: GRPC
+            port: 50051
+            spec:
+              initialDelaySeconds: 10
+              periodSeconds: 10
+              timeoutSeconds: 5
+              failureThreshold: 30  # 5 min for model download
+        
+        resources:
+          requests:
+            memory: 2Gi
+            cpu: 500m
+          limits:
+            memory: 4Gi  # Hard OOM kill if exceeded
+            cpu: 2000m
+
+# ============================================================================
+# Services
+# ============================================================================
+service:
+  main:
+    controller: main
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.1.100  # IMPORTANT: Change to your static IP
+    ports:
+      http:
+        port: 9000
+        targetPort: http
+        protocol: HTTP
+      metrics:
+        port: 9090
+        targetPort: metrics
+        protocol: HTTP
+
+# ============================================================================
+# Persistence
+# ============================================================================
+persistence:
+  # Media files on NFS (read-write)
+  media:
+    enabled: true
+    type: nfs
+    server: 192.168.1.10  # IMPORTANT: Change to your NAS IP
+    path: /mnt/pool/media  # IMPORTANT: Change to your NFS export path
+    advancedMounts:
+      main:
+        orchestrator:
+          - path: /media
+            readOnly: false  # RW for subtitle writing
+        worker:
+          - path: /media
+            readOnly: false
+  
+  # Whisper models (PVC)
+  models:
+    enabled: true
+    type: persistentVolumeClaim
+    accessMode: ReadWriteOnce
+    size: 5Gi
+    storageClass: local-path  # IMPORTANT: Change to your storage class
+    retain: true
+    advancedMounts:
+      main:
+        worker:
+          - path: /models
+  
+  # Cache (tmpfs for fast model loading)
+  cache:
+    enabled: true
+    type: emptyDir
+    medium: Memory
+    sizeLimit: 1Gi
+    globalMounts:
+      - path: /cache
+
+# ============================================================================
+# Monitoring (Prometheus)
+# ============================================================================
+serviceMonitor:
+  main:
+    enabled: true
+    serviceName: subgen-main
+    labels:
+      release: prometheus  # IMPORTANT: Match your Prometheus Operator selector
+    endpoints:
+      - port: metrics
+        scheme: http
+        path: /metrics
+        interval: 30s
+        scrapeTimeout: 10s

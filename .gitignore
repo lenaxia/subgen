@@ -10,3 +10,16 @@
 subgen.env
 
 models/
+
+# Testing
+htmlcov/
+.coverage
+.pytest_cache/
+*.pyc
+__pycache__/
+.tox/
+
+# Virtual environments
+.venv/
+venv/
+env/

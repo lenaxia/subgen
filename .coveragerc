@@ -1,0 +1,28 @@
+[run]
+source = .
+omit = 
+    tests/*
+    launcher.py
+    .venv/*
+    venv/*
+    */site-packages/*
+    */dist-packages/*
+    */__pycache__/*
+
+[report]
+# Don't complain about these lines in coverage
+exclude_lines =
+    pragma: no cover
+    def __repr__
+    raise AssertionError
+    raise NotImplementedError
+    if __name__ == .__main__.:
+    if TYPE_CHECKING:
+    @abstractmethod
+    @abc.abstractmethod
+
+# Show files with 100% coverage too
+skip_covered = False
+
+# Fail if coverage below 10% (will increase as we add tests)
+fail_under = 10

@@ -1,0 +1,180 @@
+syntax = "proto3";
+
+package subgen.v1;
+
+option go_package = "github.com/your-org/subgen/orchestrator/pkg/api/v1";
+
+// ============================================================================
+// Transcription Service
+// ============================================================================
+
+service TranscriptionService {
+  // Transcribe audio to subtitles (SRT or LRC)
+  rpc Transcribe(TranscribeRequest) returns (TranscribeResponse);
+  
+  // Detect language from audio sample
+  rpc DetectLanguage(DetectLanguageRequest) returns (DetectLanguageResponse);
+  
+  // Health check for orchestrator monitoring
+  rpc HealthCheck(HealthCheckRequest) returns (HealthCheckResponse);
+}
+
+// ============================================================================
+// Transcribe RPC
+// ============================================================================
+
+message TranscribeRequest {
+  // File path on shared NFS (both orchestrator and worker can access)
+  string file_path = 1;
+  
+  // Task type: "transcribe" or "translate"
+  string task_type = 2;
+  
+  // Force language (ISO 639-1 code) or empty for auto-detect
+  string force_language = 3;
+  
+  // Transcription options
+  TranscribeOptions options = 4;
+  
+  // Metadata for post-processing (optional)
+  map<string, string> metadata = 5;  // e.g., plex_item_id, jellyfin_item_id
+}
+
+message TranscribeOptions {
+  // Whisper model: tiny, base, small, medium, large, large-v3
+  string whisper_model = 1;
+  
+  // CPU threads for transcription
+  int32 whisper_threads = 2;
+  
+  // Word-level highlighting (karaoke style)
+  bool word_level_highlight = 3;
+  
+  // Custom regroup algorithm (stable-ts)
+  string custom_regroup = 4;
+  
+  // Generate LRC for audio files (vs SRT)
+  bool lrc_for_audio = 5;
+  
+  // Custom prompt for model
+  string custom_prompt = 6;
+  
+  // Append "Transcribed by..." footer
+  bool append_footer = 7;
+  
+  // Subtitle language name (aa, en, etc.)
+  string subtitle_language_name = 8;
+  
+  // Show model name in subtitle filename
+  bool show_model_in_filename = 9;
+  
+  // Show "subgen" in subtitle filename
+  bool show_subgen_in_filename = 10;
+}
+
+message TranscribeResponse {
+  // Success flag
+  bool success = 1;
+  
+  // Subtitle file path (where it was written)
+  string subtitle_path = 2;
+  
+  // Detected language (ISO 639-1 code)
+  string detected_language = 3;
+  
+  // Error message (if success=false)
+  string error_message = 4;
+  
+  // Transcription statistics
+  TranscriptionStats stats = 5;
+}
+
+message TranscriptionStats {
+  // Total duration in seconds
+  float duration_seconds = 1;
+  
+  // Number of subtitle segments
+  int32 segment_count = 2;
+  
+  // Model load time (milliseconds)
+  int64 model_load_time_ms = 3;
+  
+  // Transcription time (milliseconds)
+  int64 transcription_time_ms = 4;
+  
+  // Peak memory usage (MB)
+  int64 peak_memory_mb = 5;
+}
+
+// ============================================================================
+// Detect Language RPC
+// ============================================================================
+
+message DetectLanguageRequest {
+  // File path or audio content
+  oneof audio_source {
+    string file_path = 1;
+    bytes audio_content = 2;
+  }
+  
+  // Sample length in seconds
+  int32 sample_length = 3;
+  
+  // Sample offset in seconds
+  int32 sample_offset = 4;
+}
+
+message DetectLanguageResponse {
+  // Success flag
+  bool success = 1;
+  
+  // Detected language code (ISO 639-1)
+  string language_code = 2;
+  
+  // Language name in English
+  string language_name = 3;
+  
+  // Confidence score (0.0 - 1.0)
+  float confidence = 4;
+  
+  // Error message (if success=false)
+  string error_message = 5;
+}
+
+// ============================================================================
+// Health Check RPC
+// ============================================================================
+
+message HealthCheckRequest {
+  // Empty for now, can add ping payload later
+}
+
+message HealthCheckResponse {
+  enum Status {
+    UNKNOWN = 0;
+    HEALTHY = 1;
+    UNHEALTHY = 2;
+    STARTING = 3;
+  }
+  
+  // Health status
+  Status status = 1;
+  
+  // Current memory usage (MB)
+  int64 memory_mb = 2;
+  
+  // Is Whisper model loaded?
+  bool model_loaded = 3;
+  
+  // Total jobs processed since start
+  int32 jobs_processed = 4;
+  
+  // Jobs currently processing
+  int32 jobs_active = 5;
+  
+  // Worker version
+  string version = 6;
+  
+  // Uptime in seconds
+  int64 uptime_seconds = 7;
+}
