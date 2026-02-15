@@ -5,7 +5,7 @@ bin/
 *.dll
 *.so
 *.dylib
-orchestrator
+/orchestrator
 
 # Test binary, built with `go test -c`
 *.test

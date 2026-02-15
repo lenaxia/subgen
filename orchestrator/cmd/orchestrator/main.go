@@ -11,6 +11,7 @@ import (
 	"syscall"
 	"time"
 
+	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/sirupsen/logrus"
 )
 
@@ -58,10 +59,21 @@ func main() {
 		return
 	}
 
-	// Setup structured logging
+	// Load configuration
+	cfg, err := config.Load()
+	if err != nil {
+		fmt.Fprintf(os.Stderr, "Failed to load configuration: %v\n", err)
+		os.Exit(1)
+	}
+
+	// Setup structured logging with config log level
 	log := logrus.New()
 	log.SetFormatter(&logrus.JSONFormatter{})
-	log.SetLevel(logrus.InfoLevel)
+	level, err := logrus.ParseLevel(cfg.LogLevel)
+	if err != nil {
+		level = logrus.InfoLevel
+	}
+	log.SetLevel(level)
 
 	// Log startup
 	buildInfo := GetBuildInfo()

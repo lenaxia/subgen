@@ -1,0 +1,318 @@
+package config
+
+import (
+	"fmt"
+	"os"
+	"strings"
+
+	"github.com/sirupsen/logrus"
+	"github.com/spf13/viper"
+)
+
+// Config holds all orchestrator configuration
+type Config struct {
+	// Server Configuration
+	WebhookPort int
+	MetricsPort int
+	LogLevel    string
+
+	// Media Server Configuration
+	Plex     PlexConfig
+	Jellyfin JellyfinConfig
+
+	// Worker Configuration
+	Worker WorkerConfig
+
+	// Queue Configuration
+	Queue QueueConfig
+
+	// Transcription Options (passed to worker)
+	Transcription TranscriptionConfig
+
+	// Processing Control
+	ProcessAddedMedia  bool
+	ProcessMediaOnPlay bool
+
+	// Skip Configuration
+	Skip SkipConfig
+}
+
+type PlexConfig struct {
+	Token   string
+	Server  string
+	Enabled bool
+}
+
+type JellyfinConfig struct {
+	Token   string
+	Server  string
+	Enabled bool
+}
+
+type WorkerConfig struct {
+	Discovery string
+	Address   string
+	Timeout   int // seconds
+}
+
+type QueueConfig struct {
+	MaxSize int
+}
+
+type TranscriptionConfig struct {
+	WhisperModel         string
+	WhisperThreads       int
+	Device               string
+	WordLevelHighlight   bool
+	CustomRegroup        string
+	LRCForAudioFiles     bool
+	SubtitleLanguageName string
+	AppendFooter         bool
+	ModelCleanupDelay    int // seconds
+}
+
+type SkipConfig struct {
+	IfExternalSubtitlesExist bool
+	IfTargetSubtitlesExist   bool
+	IfInternalSubtitlesLang  string
+	SubtitleLanguages        []string
+	AudioLanguages           []string
+	OnlySubgenSubtitles      bool
+}
+
+// Load reads configuration from environment variables
+func Load() (*Config, error) {
+	v := viper.New()
+
+	// Set defaults
+	setDefaults(v)
+
+	// Read from environment
+	v.AutomaticEnv()
+
+	// Allow .env file in development (optional)
+	if _, err := os.Stat(".env"); err == nil {
+		v.SetConfigFile(".env")
+		v.SetConfigType("env")
+		if err := v.ReadInConfig(); err != nil {
+			return nil, fmt.Errorf("error reading config file: %w", err)
+		}
+	}
+
+	// Build config struct
+	config := &Config{
+		WebhookPort: v.GetInt("WEBHOOK_PORT"),
+		MetricsPort: v.GetInt("METRICS_PORT"),
+		LogLevel:    v.GetString("LOG_LEVEL"),
+
+		Plex: PlexConfig{
+			Token:   v.GetString("PLEX_TOKEN"),
+			Server:  v.GetString("PLEX_SERVER"),
+			Enabled: v.GetBool("PLEX_ENABLED"),
+		},
+
+		Jellyfin: JellyfinConfig{
+			Token:   v.GetString("JELLYFIN_TOKEN"),
+			Server:  v.GetString("JELLYFIN_SERVER"),
+			Enabled: v.GetBool("JELLYFIN_ENABLED"),
+		},
+
+		Worker: WorkerConfig{
+			Discovery: v.GetString("WORKER_DISCOVERY"),
+			Address:   v.GetString("WORKER_ADDRESS"),
+			Timeout:   v.GetInt("WORKER_TIMEOUT"),
+		},
+
+		Queue: QueueConfig{
+			MaxSize: v.GetInt("QUEUE_MAX_SIZE"),
+		},
+
+		Transcription: TranscriptionConfig{
+			WhisperModel:         v.GetString("WHISPER_MODEL"),
+			WhisperThreads:       v.GetInt("WHISPER_THREADS"),
+			Device:               v.GetString("TRANSCRIBE_DEVICE"),
+			WordLevelHighlight:   v.GetBool("WORD_LEVEL_HIGHLIGHT"),
+			CustomRegroup:        v.GetString("CUSTOM_REGROUP"),
+			LRCForAudioFiles:     v.GetBool("LRC_FOR_AUDIO_FILES"),
+			SubtitleLanguageName: v.GetString("SUBTITLE_LANGUAGE_NAME"),
+			AppendFooter:         v.GetBool("APPEND_FOOTER"),
+			ModelCleanupDelay:    v.GetInt("MODEL_CLEANUP_DELAY"),
+		},
+
+		ProcessAddedMedia:  v.GetBool("PROCESS_ADDED_MEDIA"),
+		ProcessMediaOnPlay: v.GetBool("PROCESS_MEDIA_ON_PLAY"),
+
+		Skip: SkipConfig{
+			IfExternalSubtitlesExist: v.GetBool("SKIP_IF_EXTERNAL_SUBTITLES_EXIST"),
+			IfTargetSubtitlesExist:   v.GetBool("SKIP_IF_TARGET_SUBTITLES_EXIST"),
+			IfInternalSubtitlesLang:  v.GetString("SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE"),
+			SubtitleLanguages:        parseStringList(v.GetString("SKIP_SUBTITLE_LANGUAGES")),
+			AudioLanguages:           parseStringList(v.GetString("SKIP_IF_AUDIO_LANGUAGES")),
+			OnlySubgenSubtitles:      v.GetBool("SKIP_ONLY_SUBGEN_SUBTITLES"),
+		},
+	}
+
+	// Validate
+	if err := validate(config); err != nil {
+		return nil, fmt.Errorf("config validation failed: %w", err)
+	}
+
+	// Log config (redact secrets)
+	logConfig(config)
+
+	return config, nil
+}
+
+// setDefaults sets default values for all configuration
+func setDefaults(v *viper.Viper) {
+	// Server
+	v.SetDefault("WEBHOOK_PORT", 9000)
+	v.SetDefault("METRICS_PORT", 9090)
+	v.SetDefault("LOG_LEVEL", "info")
+
+	// Plex
+	v.SetDefault("PLEX_ENABLED", true)
+	v.SetDefault("PLEX_SERVER", "http://localhost:32400")
+
+	// Jellyfin
+	v.SetDefault("JELLYFIN_ENABLED", false)
+	v.SetDefault("JELLYFIN_SERVER", "http://localhost:8096")
+
+	// Worker
+	v.SetDefault("WORKER_DISCOVERY", "localhost")
+	v.SetDefault("WORKER_ADDRESS", "localhost:50051")
+	v.SetDefault("WORKER_TIMEOUT", 18000) // 5 hours
+
+	// Queue
+	v.SetDefault("QUEUE_MAX_SIZE", 1000)
+
+	// Transcription
+	v.SetDefault("WHISPER_MODEL", "medium")
+	v.SetDefault("WHISPER_THREADS", 4)
+	v.SetDefault("TRANSCRIBE_DEVICE", "cpu")
+	v.SetDefault("WORD_LEVEL_HIGHLIGHT", false)
+	v.SetDefault("CUSTOM_REGROUP", "cm_sl=84_sl=42++++++1")
+	v.SetDefault("LRC_FOR_AUDIO_FILES", true)
+	v.SetDefault("SUBTITLE_LANGUAGE_NAME", "aa")
+	v.SetDefault("APPEND_FOOTER", false)
+	v.SetDefault("MODEL_CLEANUP_DELAY", 30)
+
+	// Processing
+	v.SetDefault("PROCESS_ADDED_MEDIA", true)
+	v.SetDefault("PROCESS_MEDIA_ON_PLAY", true)
+
+	// Skip
+	v.SetDefault("SKIP_IF_EXTERNAL_SUBTITLES_EXIST", false)
+	v.SetDefault("SKIP_IF_TARGET_SUBTITLES_EXIST", true)
+	v.SetDefault("SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE", "")
+	v.SetDefault("SKIP_SUBTITLE_LANGUAGES", "")
+	v.SetDefault("SKIP_IF_AUDIO_LANGUAGES", "")
+	v.SetDefault("SKIP_ONLY_SUBGEN_SUBTITLES", false)
+}
+
+// validate performs validation on the config struct
+func validate(config *Config) error {
+	// Validate port ranges
+	if config.WebhookPort < 1 || config.WebhookPort > 65535 {
+		return fmt.Errorf("WEBHOOK_PORT must be between 1 and 65535, got %d", config.WebhookPort)
+	}
+	if config.MetricsPort < 1 || config.MetricsPort > 65535 {
+		return fmt.Errorf("METRICS_PORT must be between 1 and 65535, got %d", config.MetricsPort)
+	}
+
+	// Validate log level
+	validLogLevels := []string{"debug", "info", "warn", "error"}
+	if !contains(validLogLevels, config.LogLevel) {
+		return fmt.Errorf("LOG_LEVEL must be one of [debug, info, warn, error], got '%s'", config.LogLevel)
+	}
+
+	// Required: At least one media server enabled
+	if !config.Plex.Enabled && !config.Jellyfin.Enabled {
+		return fmt.Errorf("at least one media server must be enabled (PLEX_ENABLED or JELLYFIN_ENABLED)")
+	}
+
+	// Required: Plex token if Plex enabled
+	if config.Plex.Enabled && config.Plex.Token == "" {
+		return fmt.Errorf("PLEX_TOKEN is required when PLEX_ENABLED=true")
+	}
+
+	// Required: Jellyfin token if Jellyfin enabled
+	if config.Jellyfin.Enabled && config.Jellyfin.Token == "" {
+		return fmt.Errorf("JELLYFIN_TOKEN is required when JELLYFIN_ENABLED=true")
+	}
+
+	// Validate worker discovery mode
+	validDiscoveryModes := []string{"localhost", "kubernetes"}
+	if !contains(validDiscoveryModes, config.Worker.Discovery) {
+		return fmt.Errorf("WORKER_DISCOVERY must be one of [localhost, kubernetes], got '%s', check if invalid worker discovery mode", config.Worker.Discovery)
+	}
+
+	// Validate worker address format for localhost mode
+	if config.Worker.Discovery == "localhost" {
+		if config.Worker.Address == "" {
+			return fmt.Errorf("WORKER_ADDRESS is required when WORKER_DISCOVERY=localhost")
+		}
+		if !strings.Contains(config.Worker.Address, ":") {
+			return fmt.Errorf("WORKER_ADDRESS must include port (e.g., localhost:50051)")
+		}
+	}
+
+	return nil
+}
+
+// logConfig logs the configuration (with secrets redacted)
+func logConfig(config *Config) {
+	logrus.WithFields(logrus.Fields{
+		"webhook_port":          config.WebhookPort,
+		"metrics_port":          config.MetricsPort,
+		"log_level":             config.LogLevel,
+		"plex_enabled":          config.Plex.Enabled,
+		"plex_server":           config.Plex.Server,
+		"plex_token":            redact(config.Plex.Token),
+		"jellyfin_enabled":      config.Jellyfin.Enabled,
+		"jellyfin_server":       config.Jellyfin.Server,
+		"jellyfin_token":        redact(config.Jellyfin.Token),
+		"worker_discovery":      config.Worker.Discovery,
+		"worker_address":        config.Worker.Address,
+		"worker_timeout":        config.Worker.Timeout,
+		"queue_max_size":        config.Queue.MaxSize,
+		"whisper_model":         config.Transcription.WhisperModel,
+		"whisper_threads":       config.Transcription.WhisperThreads,
+		"process_added_media":   config.ProcessAddedMedia,
+		"process_media_on_play": config.ProcessMediaOnPlay,
+	}).Info("Configuration loaded")
+}
+
+// redact replaces all but first 4 characters with asterisks
+func redact(s string) string {
+	if len(s) <= 4 {
+		return "****"
+	}
+	return s[:4] + strings.Repeat("*", len(s)-4)
+}
+
+// parseStringList parses a comma-separated string into a slice
+func parseStringList(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// contains checks if a string slice contains a value
+func contains(slice []string, value string) bool {
+	for _, item := range slice {
+		if item == value {
+			return true
+		}
+	}
+	return false
+}

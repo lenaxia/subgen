@@ -80,19 +80,19 @@ jobs:
           VERSION_OUTPUT=$(./bin/orchestrator --version)
           echo "Version output:"
           echo "$VERSION_OUTPUT"
-          
+
           # Verify that BuildTime is not "unknown"
           if echo "$VERSION_OUTPUT" | grep -q "Build Time: unknown"; then
             echo "ERROR: BuildTime was not set via ldflags"
             exit 1
           fi
-          
+
           # Verify that GitCommit is not "unknown"
           if echo "$VERSION_OUTPUT" | grep -q "Git Commit: unknown"; then
             echo "ERROR: GitCommit was not set via ldflags"
             exit 1
           fi
-          
+
           echo "✓ ldflags verification passed"
 
       - name: Test binary
