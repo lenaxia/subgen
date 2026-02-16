@@ -10,8 +10,9 @@ import (
 
 // BasicChecker implements basic file existence and embedded subtitle skip checks
 type BasicChecker struct {
-	config   *Config
-	detector *SubtitleDetector
+	config          *Config
+	detector        *SubtitleDetector
+	externalScanner *ExternalScanner
 }
 
 // NewBasicChecker creates a new BasicChecker with the given configuration
@@ -25,8 +26,9 @@ func NewBasicChecker(config *Config) (*BasicChecker, error) {
 	}
 
 	return &BasicChecker{
-		config:   config,
-		detector: NewSubtitleDetector(),
+		config:          config,
+		detector:        NewSubtitleDetector(),
+		externalScanner: NewExternalScanner(),
 	}, nil
 }
 
@@ -80,6 +82,44 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 				Reason:     ReasonEmbeddedSubtitle,
 				Details:    fmt.Sprintf("embedded subtitle found: language=%s", c.config.SkipIfInternalSubtitlesLanguage),
 			}, nil
+		}
+	}
+
+	// Check for external subtitles (if enabled)
+	if c.config.SkipIfExternalSubtitlesExist {
+		subtitles, err := c.externalScanner.ScanForSubtitles(filePath)
+		if err != nil {
+			// Log error but don't fail the check - directory might not be accessible
+			// Continue with other checks
+		} else {
+			// Determine target language (use internal language config)
+			targetLang := c.config.SkipIfInternalSubtitlesLanguage
+
+			// Filter subtitles if SKIP_ONLY_SUBGEN_SUBTITLES is enabled
+			var filteredSubtitles []ExternalSubtitle
+			if c.config.SkipOnlySubgenSubtitles {
+				for _, sub := range subtitles {
+					if sub.IsSubgenGenerated {
+						filteredSubtitles = append(filteredSubtitles, sub)
+					}
+				}
+			} else {
+				filteredSubtitles = subtitles
+			}
+
+			// Check if any filtered subtitle matches target language
+			if c.externalScanner.HasLanguage(filteredSubtitles, targetLang) {
+				details := fmt.Sprintf("external subtitle found: language=%s", targetLang)
+				if c.config.SkipOnlySubgenSubtitles {
+					details += " (subgen-generated only)"
+				}
+
+				return &CheckResult{
+					ShouldSkip: true,
+					Reason:     ReasonExternalSubtitle,
+					Details:    details,
+				}, nil
+			}
 		}
 	}
 

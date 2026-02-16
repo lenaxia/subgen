@@ -12,6 +12,8 @@ const (
 	ReasonLRCExists SkipReason = "lrc_file_exists"
 	// ReasonEmbeddedSubtitle indicates an embedded subtitle was found in the container
 	ReasonEmbeddedSubtitle SkipReason = "embedded_subtitle_exists"
+	// ReasonExternalSubtitle indicates an external subtitle file was found
+	ReasonExternalSubtitle SkipReason = "external_subtitle_exists"
 	// ReasonNotApplicable indicates skip logic doesn't apply
 	ReasonNotApplicable SkipReason = "not_applicable"
 )

@@ -17,12 +17,20 @@ type Config struct {
 	// SkipIfInternalSubtitlesLanguage specifies which language to skip if found embedded
 	// Empty string disables this check (default: "eng")
 	SkipIfInternalSubtitlesLanguage string
+	// SkipIfExternalSubtitlesExist determines whether to skip if external subtitle files exist
+	// (default: false)
+	SkipIfExternalSubtitlesExist bool
+	// SkipOnlySubgenSubtitles determines whether to only skip if subtitles are subgen-generated
+	// (default: false)
+	SkipOnlySubgenSubtitles bool
 }
 
 // NewConfig creates a Config from environment variables
 // Reads SKIP_IF_TARGET_SUBTITLES_EXIST (default: true)
 // Reads CHECK_EMBEDDED_SUBTITLES (default: true)
 // Reads SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE (default: "eng")
+// Reads SKIP_IF_EXTERNAL_SUBTITLES_EXIST (default: false)
+// Reads SKIP_ONLY_SUBGEN_SUBTITLES (default: false)
 func NewConfig() (*Config, error) {
 	skipStr := os.Getenv("SKIP_IF_TARGET_SUBTITLES_EXIST")
 	if skipStr == "" {
@@ -51,10 +59,34 @@ func NewConfig() (*Config, error) {
 		skipInternalLang = "eng"
 	}
 
+	// Skip if external subtitles exist (default: false)
+	skipExternalStr := os.Getenv("SKIP_IF_EXTERNAL_SUBTITLES_EXIST")
+	if skipExternalStr == "" {
+		skipExternalStr = "false"
+	}
+
+	skipExternal, err := strconv.ParseBool(skipExternalStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SKIP_IF_EXTERNAL_SUBTITLES_EXIST value: %w", err)
+	}
+
+	// Skip only subgen subtitles (default: false)
+	skipOnlySubgenStr := os.Getenv("SKIP_ONLY_SUBGEN_SUBTITLES")
+	if skipOnlySubgenStr == "" {
+		skipOnlySubgenStr = "false"
+	}
+
+	skipOnlySubgen, err := strconv.ParseBool(skipOnlySubgenStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SKIP_ONLY_SUBGEN_SUBTITLES value: %w", err)
+	}
+
 	return &Config{
 		SkipIfTargetSubtitleExists:      skip,
 		CheckEmbeddedSubtitles:          checkEmbedded,
 		SkipIfInternalSubtitlesLanguage: skipInternalLang,
+		SkipIfExternalSubtitlesExist:    skipExternal,
+		SkipOnlySubgenSubtitles:         skipOnlySubgen,
 	}, nil
 }
 
