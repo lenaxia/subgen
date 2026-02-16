@@ -1,0 +1,93 @@
+version: '3.8'
+
+services:
+  # Python worker service
+  worker:
+    build:
+      context: ../worker
+      dockerfile: Dockerfile
+    container_name: subgen-worker-integration-test
+    environment:
+      # gRPC Configuration
+      GRPC_HOST: "0.0.0.0"
+      GRPC_PORT: "50051"
+      
+      # Whisper Configuration (tiny model for fast tests)
+      WHISPER_MODEL: "tiny"
+      WHISPER_THREADS: "2"
+      TRANSCRIBE_DEVICE: "cpu"
+      COMPUTE_TYPE: "int8"
+      
+      # System Configuration
+      MEMORY_THRESHOLD_MB: "2000"
+      LOG_LEVEL: "DEBUG"
+      
+      # Model Lifecycle
+      MODEL_CLEANUP_DELAY: "5"          # Short delay for testing
+      CLEAR_VRAM_ON_COMPLETE: "false"
+      
+      # Paths
+      MODEL_PATH: "/models"
+    ports:
+      - "50051:50051"
+    volumes:
+      - ./testdata:/testdata:ro           # Read-only test data
+      - ../models:/models:rw               # Model storage (shared with host)
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; channel = grpc.insecure_channel('localhost:50051'); stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); exit(0 if response.status == 1 else 1)"]
+      interval: 5s
+      timeout: 10s
+      retries: 10
+      start_period: 30s
+    networks:
+      - subgen-integration-test
+
+  # Go orchestrator (for integration testing)
+  orchestrator:
+    build:
+      context: ..
+      dockerfile: orchestrator/Dockerfile
+      args:
+        VERSION: "test"
+        BUILD_TIME: "${BUILD_TIME:-now}"
+        GIT_COMMIT: "${GIT_COMMIT:-test}"
+    container_name: subgen-orchestrator-integration-test
+    environment:
+      # Worker Discovery
+      WORKER_DISCOVERY: "localhost"
+      PYTHON_WORKER_ADDRESS: "worker:50051"
+      
+      # HTTP Server
+      WEBHOOK_PORT: "9000"
+      METRICS_PORT: "9090"
+      
+      # Logging
+      LOG_LEVEL: "DEBUG"
+      
+      # Queue Configuration
+      QUEUE_MAX_SIZE: "100"
+      QUEUE_STALE_TASK_TIMEOUT: "300"
+      
+      # Media Servers (disabled for integration tests)
+      PLEX_ENABLED: "false"
+      JELLYFIN_ENABLED: "false"
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    depends_on:
+      worker:
+        condition: service_healthy
+    volumes:
+      - ./testdata:/testdata:ro
+    networks:
+      - subgen-integration-test
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orchestrator", "--health"]
+      interval: 5s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+
+networks:
+  subgen-integration-test:
+    driver: bridge
