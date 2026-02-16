@@ -23,6 +23,12 @@ type Config struct {
 	// SkipOnlySubgenSubtitles determines whether to only skip if subtitles are subgen-generated
 	// (default: false)
 	SkipOnlySubgenSubtitles bool
+	// SkipSubtitleLanguages is a list of subtitle languages to skip (pipe-separated)
+	// e.g., "eng|jpn|kor" (default: empty)
+	SkipSubtitleLanguages []string
+	// SkipIfAudioLanguages is a list of audio languages to skip (pipe-separated)
+	// e.g., "eng|spa" (default: empty)
+	SkipIfAudioLanguages []string
 }
 
 // NewConfig creates a Config from environment variables
@@ -31,6 +37,8 @@ type Config struct {
 // Reads SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE (default: "eng")
 // Reads SKIP_IF_EXTERNAL_SUBTITLES_EXIST (default: false)
 // Reads SKIP_ONLY_SUBGEN_SUBTITLES (default: false)
+// Reads SKIP_SUBTITLE_LANGUAGES (default: empty)
+// Reads SKIP_IF_AUDIO_LANGUAGES (default: empty)
 func NewConfig() (*Config, error) {
 	skipStr := os.Getenv("SKIP_IF_TARGET_SUBTITLES_EXIST")
 	if skipStr == "" {
@@ -81,12 +89,22 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid SKIP_ONLY_SUBGEN_SUBTITLES value: %w", err)
 	}
 
+	// Skip subtitle languages (default: empty)
+	skipSubLangStr := os.Getenv("SKIP_SUBTITLE_LANGUAGES")
+	skipSubLangs := ParseLanguageList(skipSubLangStr)
+
+	// Skip if audio languages (default: empty)
+	skipAudioLangStr := os.Getenv("SKIP_IF_AUDIO_LANGUAGES")
+	skipAudioLangs := ParseLanguageList(skipAudioLangStr)
+
 	return &Config{
 		SkipIfTargetSubtitleExists:      skip,
 		CheckEmbeddedSubtitles:          checkEmbedded,
 		SkipIfInternalSubtitlesLanguage: skipInternalLang,
 		SkipIfExternalSubtitlesExist:    skipExternal,
 		SkipOnlySubgenSubtitles:         skipOnlySubgen,
+		SkipSubtitleLanguages:           skipSubLangs,
+		SkipIfAudioLanguages:            skipAudioLangs,
 	}, nil
 }
 

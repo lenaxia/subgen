@@ -10,6 +10,7 @@ type FFProbeStream struct {
 	Index     int               `json:"index"`
 	CodecType string            `json:"codec_type"`
 	CodecName string            `json:"codec_name"`
+	Channels  int               `json:"channels,omitempty"` // Audio channel count
 	Tags      FFProbeStreamTags `json:"tags,omitempty"`
 }
 

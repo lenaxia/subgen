@@ -50,13 +50,13 @@ func (fw *FileWatcher) Watch(ctx context.Context) error {
 
 	fw.watcher = watcher
 
-	// Add all configured folders
+	// Add all configured folders with recursive subdirectories
 	for _, folder := range fw.folders {
-		if err := watcher.Add(folder); err != nil {
-			fw.log.WithError(err).Warnf("Failed to watch folder: %s", folder)
+		if err := fw.addRecursive(folder); err != nil {
+			fw.log.WithError(err).Warnf("Failed to watch folder recursively: %s", folder)
 			// Continue watching other folders even if one fails
 		} else {
-			fw.log.Infof("Watching folder: %s", folder)
+			fw.log.Infof("Watching folder recursively: %s", folder)
 		}
 	}
 
@@ -91,6 +91,13 @@ func (fw *FileWatcher) Watch(ctx context.Context) error {
 
 // handleFileCreated processes a file creation event
 func (fw *FileWatcher) handleFileCreated(filePath string) {
+	// Check if this is a directory
+	if fw.isDirectory(filePath) {
+		fw.handleDirectoryCreated(filePath)
+		return
+	}
+
+	// Handle file creation
 	fw.log.WithField("file", filePath).Info("File created")
 
 	// Wait for file stability before processing

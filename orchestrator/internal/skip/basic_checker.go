@@ -13,6 +13,7 @@ type BasicChecker struct {
 	config          *Config
 	detector        *SubtitleDetector
 	externalScanner *ExternalScanner
+	audioDetector   *AudioDetector
 }
 
 // NewBasicChecker creates a new BasicChecker with the given configuration
@@ -29,6 +30,7 @@ func NewBasicChecker(config *Config) (*BasicChecker, error) {
 		config:          config,
 		detector:        NewSubtitleDetector(),
 		externalScanner: NewExternalScanner(),
+		audioDetector:   NewAudioDetector(),
 	}, nil
 }
 
@@ -119,6 +121,58 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 					Reason:     ReasonExternalSubtitle,
 					Details:    details,
 				}, nil
+			}
+		}
+	}
+
+	// Check audio language filtering (if enabled)
+	if len(c.config.SkipIfAudioLanguages) > 0 && isVideoFile(filePath) {
+		audioTracks, err := c.audioDetector.GetAudioTracks(ctx, filePath)
+		if err != nil {
+			// Log error but don't fail the check - FFprobe might not be available
+			// Continue with other checks
+		} else {
+			for _, track := range audioTracks {
+				if MatchesAnyLanguage(track.Language, c.config.SkipIfAudioLanguages) {
+					return &CheckResult{
+						ShouldSkip: true,
+						Reason:     ReasonAudioLanguageSkip,
+						Details:    fmt.Sprintf("audio track language matches skip list: %s", track.Language),
+					}, nil
+				}
+			}
+		}
+	}
+
+	// Check subtitle language filtering (if enabled)
+	if len(c.config.SkipSubtitleLanguages) > 0 {
+		// Check embedded subtitles for language filter
+		if c.config.CheckEmbeddedSubtitles && isVideoFile(filePath) {
+			tracks, err := c.detector.GetEmbeddedSubtitles(ctx, filePath)
+			if err == nil {
+				for _, track := range tracks {
+					if MatchesAnyLanguage(track.Language, c.config.SkipSubtitleLanguages) {
+						return &CheckResult{
+							ShouldSkip: true,
+							Reason:     ReasonSubtitleLanguageSkip,
+							Details:    fmt.Sprintf("embedded subtitle language matches skip list: %s", track.Language),
+						}, nil
+					}
+				}
+			}
+		}
+
+		// Check external subtitles for language filter
+		subtitles, err := c.externalScanner.ScanForSubtitles(filePath)
+		if err == nil {
+			for _, sub := range subtitles {
+				if MatchesAnyLanguage(sub.Language, c.config.SkipSubtitleLanguages) {
+					return &CheckResult{
+						ShouldSkip: true,
+						Reason:     ReasonSubtitleLanguageSkip,
+						Details:    fmt.Sprintf("external subtitle language matches skip list: %s", sub.Language),
+					}, nil
+				}
 			}
 		}
 	}
