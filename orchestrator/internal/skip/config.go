@@ -29,6 +29,12 @@ type Config struct {
 	// SkipIfAudioLanguages is a list of audio languages to skip (pipe-separated)
 	// e.g., "eng|spa" (default: empty)
 	SkipIfAudioLanguages []string
+	// PreferredAudioLanguages is a list of preferred audio languages (pipe-separated)
+	// e.g., "eng|jpn|kor" (default: empty) - STORY_05
+	PreferredAudioLanguages []string
+	// LimitToPreferredAudioLanguage determines whether to only process files with preferred audio
+	// (default: false) - STORY_05
+	LimitToPreferredAudioLanguage bool
 }
 
 // NewConfig creates a Config from environment variables
@@ -39,6 +45,8 @@ type Config struct {
 // Reads SKIP_ONLY_SUBGEN_SUBTITLES (default: false)
 // Reads SKIP_SUBTITLE_LANGUAGES (default: empty)
 // Reads SKIP_IF_AUDIO_LANGUAGES (default: empty)
+// Reads PREFERRED_AUDIO_LANGUAGES (default: empty) - STORY_05
+// Reads LIMIT_TO_PREFERRED_AUDIO_LANGUAGE (default: false) - STORY_05
 func NewConfig() (*Config, error) {
 	skipStr := os.Getenv("SKIP_IF_TARGET_SUBTITLES_EXIST")
 	if skipStr == "" {
@@ -97,6 +105,21 @@ func NewConfig() (*Config, error) {
 	skipAudioLangStr := os.Getenv("SKIP_IF_AUDIO_LANGUAGES")
 	skipAudioLangs := ParseLanguageList(skipAudioLangStr)
 
+	// Preferred audio languages (default: empty) - STORY_05
+	preferredAudioLangStr := os.Getenv("PREFERRED_AUDIO_LANGUAGES")
+	preferredAudioLangs := ParseLanguageList(preferredAudioLangStr)
+
+	// Limit to preferred audio language (default: false) - STORY_05
+	limitToPreferredStr := os.Getenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE")
+	if limitToPreferredStr == "" {
+		limitToPreferredStr = "false"
+	}
+
+	limitToPreferred, err := strconv.ParseBool(limitToPreferredStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid LIMIT_TO_PREFERRED_AUDIO_LANGUAGE value: %w", err)
+	}
+
 	return &Config{
 		SkipIfTargetSubtitleExists:      skip,
 		CheckEmbeddedSubtitles:          checkEmbedded,
@@ -105,6 +128,8 @@ func NewConfig() (*Config, error) {
 		SkipOnlySubgenSubtitles:         skipOnlySubgen,
 		SkipSubtitleLanguages:           skipSubLangs,
 		SkipIfAudioLanguages:            skipAudioLangs,
+		PreferredAudioLanguages:         preferredAudioLangs,
+		LimitToPreferredAudioLanguage:   limitToPreferred,
 	}, nil
 }
 

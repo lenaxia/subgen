@@ -144,6 +144,25 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 		}
 	}
 
+	// Check preferred audio language filtering (if enabled) - STORY_05
+	if c.config.LimitToPreferredAudioLanguage && len(c.config.PreferredAudioLanguages) > 0 && isVideoFile(filePath) {
+		audioTracks, err := c.audioDetector.GetAudioTracks(ctx, filePath)
+		if err != nil {
+			// Log error but don't fail the check - FFprobe might not be available
+			// Continue with other checks
+		} else {
+			// Check if file has any preferred audio language
+			hasPreferred := c.audioDetector.HasAnyPreferredLanguage(audioTracks, c.config.PreferredAudioLanguages)
+			if !hasPreferred {
+				return &CheckResult{
+					ShouldSkip: true,
+					Reason:     ReasonAudioLanguageMismatch,
+					Details:    "no audio tracks match preferred languages",
+				}, nil
+			}
+		}
+	}
+
 	// Check subtitle language filtering (if enabled)
 	if len(c.config.SkipSubtitleLanguages) > 0 {
 		// Check embedded subtitles for language filter

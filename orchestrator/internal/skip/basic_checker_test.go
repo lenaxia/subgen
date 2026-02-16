@@ -409,3 +409,81 @@ func TestExists(t *testing.T) {
 		})
 	}
 }
+
+// TestBasicChecker_PreferredAudioLanguageFiltering tests STORY_05 integration
+// These tests verify that preferred audio language filtering works end-to-end
+func TestBasicChecker_PreferredAudioLanguageFiltering_Disabled(t *testing.T) {
+	// When LIMIT_TO_PREFERRED_AUDIO_LANGUAGE=false, should never skip based on audio
+	tmpDir := t.TempDir()
+	videoPath := filepath.Join(tmpDir, "movie.mkv")
+
+	// Create test video file
+	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
+		t.Fatalf("Failed to create test video: %v", err)
+	}
+
+	config := &Config{
+		SkipIfTargetSubtitleExists:    false,
+		CheckEmbeddedSubtitles:        false,
+		SkipIfExternalSubtitlesExist:  false,
+		PreferredAudioLanguages:       []string{"eng", "jpn"},
+		LimitToPreferredAudioLanguage: false, // Disabled
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		t.Fatalf("Failed to create checker: %v", err)
+	}
+
+	result, err := checker.Check(context.Background(), videoPath)
+	if err != nil {
+		t.Fatalf("Check failed: %v", err)
+	}
+
+	// Should NOT skip because filtering is disabled
+	if result.ShouldSkip {
+		t.Error("Expected ShouldSkip=false when LimitToPreferredAudioLanguage=false")
+	}
+}
+
+// TestBasicChecker_PreferredAudioLanguageFiltering_EmptyList tests with empty preferred list
+func TestBasicChecker_PreferredAudioLanguageFiltering_EmptyList(t *testing.T) {
+	// When PreferredAudioLanguages is empty, should never skip
+	tmpDir := t.TempDir()
+	videoPath := filepath.Join(tmpDir, "movie.mkv")
+
+	// Create test video file
+	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
+		t.Fatalf("Failed to create test video: %v", err)
+	}
+
+	config := &Config{
+		SkipIfTargetSubtitleExists:    false,
+		CheckEmbeddedSubtitles:        false,
+		SkipIfExternalSubtitlesExist:  false,
+		PreferredAudioLanguages:       []string{}, // Empty
+		LimitToPreferredAudioLanguage: true,
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		t.Fatalf("Failed to create checker: %v", err)
+	}
+
+	result, err := checker.Check(context.Background(), videoPath)
+	if err != nil {
+		t.Fatalf("Check failed: %v", err)
+	}
+
+	// Should NOT skip because list is empty
+	if result.ShouldSkip {
+		t.Error("Expected ShouldSkip=false when PreferredAudioLanguages is empty")
+	}
+}
+
+// Note: Full integration tests with real FFprobe calls would require:
+// - Mock FFprobe command execution
+// - Test video files with known audio tracks
+// - FFprobe JSON fixtures
+// These are covered by unit tests in language_filter_test.go
+// The integration here verifies the BasicChecker correctly uses the config

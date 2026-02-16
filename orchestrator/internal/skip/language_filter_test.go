@@ -402,3 +402,133 @@ func TestAudioDetector_ExtractAudioTracks(t *testing.T) {
 		})
 	}
 }
+
+// TestAudioDetector_HasAnyPreferredLanguage tests preferred audio language filtering
+// This is the NEW method for STORY_05
+func TestAudioDetector_HasAnyPreferredLanguage(t *testing.T) {
+	detector := NewAudioDetector()
+
+	tests := []struct {
+		name           string
+		tracks         []AudioTrack
+		preferredLangs []string
+		expected       bool
+	}{
+		{
+			name: "single track matches single preferred",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "eng", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng"},
+			expected:       true,
+		},
+		{
+			name: "single track matches one of multiple preferred",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "jpn", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng", "jpn", "kor"},
+			expected:       true,
+		},
+		{
+			name: "multiple tracks, one matches",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "fre", Codec: "aac"},
+				{Index: 2, Language: "eng", Codec: "ac3"},
+			},
+			preferredLangs: []string{"eng"},
+			expected:       true,
+		},
+		{
+			name: "multiple tracks, none match",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "fre", Codec: "aac"},
+				{Index: 2, Language: "spa", Codec: "ac3"},
+			},
+			preferredLangs: []string{"eng", "jpn"},
+			expected:       false,
+		},
+		{
+			name: "ISO 639-1 vs 639-2 matching",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "en", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng", "jpn", "kor"},
+			expected:       true,
+		},
+		{
+			name: "case insensitive matching",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "ENG", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng"},
+			expected:       true,
+		},
+		{
+			name:           "empty tracks",
+			tracks:         []AudioTrack{},
+			preferredLangs: []string{"eng"},
+			expected:       false,
+		},
+		{
+			name: "empty preferred list",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "eng", Codec: "aac"},
+			},
+			preferredLangs: []string{},
+			expected:       false,
+		},
+		{
+			name: "nil preferred list",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "eng", Codec: "aac"},
+			},
+			preferredLangs: nil,
+			expected:       false,
+		},
+		{
+			name: "track with no language metadata",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng"},
+			expected:       false,
+		},
+		{
+			name: "multiple tracks with no language, one with preferred",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "", Codec: "aac"},
+				{Index: 2, Language: "eng", Codec: "ac3"},
+			},
+			preferredLangs: []string{"eng"},
+			expected:       true,
+		},
+		{
+			name: "whitespace in preferred list (should not happen after ParseLanguageList, but test defensive)",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "eng", Codec: "aac"},
+			},
+			preferredLangs: []string{" eng ", "jpn "},
+			expected:       false, // Whitespace is not trimmed in this method, should be done by ParseLanguageList
+		},
+		{
+			name: "mixed ISO codes in tracks and preferred",
+			tracks: []AudioTrack{
+				{Index: 1, Language: "en", Codec: "aac"},
+			},
+			preferredLangs: []string{"eng", "ja", "ko"},
+			expected:       true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			result := detector.HasAnyPreferredLanguage(tt.tracks, tt.preferredLangs)
+
+			if result != tt.expected {
+				t.Errorf("HasAnyPreferredLanguage(tracks=%+v, preferredLangs=%v) = %v, want %v",
+					tt.tracks, tt.preferredLangs, result, tt.expected)
+			}
+		})
+	}
+}

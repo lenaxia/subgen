@@ -173,3 +173,177 @@ func TestConfig_Structure(t *testing.T) {
 		t.Error("SkipIfTargetSubtitleExists field not mutable")
 	}
 }
+
+// TestNewConfig_PreferredAudioLanguages tests PREFERRED_AUDIO_LANGUAGES configuration (STORY_05)
+func TestNewConfig_PreferredAudioLanguages(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		expected []string
+	}{
+		{
+			name:     "default (empty)",
+			envValue: "",
+			expected: nil,
+		},
+		{
+			name:     "single language",
+			envValue: "eng",
+			expected: []string{"eng"},
+		},
+		{
+			name:     "multiple languages",
+			envValue: "eng|jpn|kor",
+			expected: []string{"eng", "jpn", "kor"},
+		},
+		{
+			name:     "with whitespace",
+			envValue: "eng | jpn | kor",
+			expected: []string{"eng", "jpn", "kor"},
+		},
+		{
+			name:     "mixed case",
+			envValue: "ENG|JPN",
+			expected: []string{"eng", "jpn"},
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue == "" {
+				os.Unsetenv("PREFERRED_AUDIO_LANGUAGES")
+			} else {
+				os.Setenv("PREFERRED_AUDIO_LANGUAGES", tt.envValue)
+				defer os.Unsetenv("PREFERRED_AUDIO_LANGUAGES")
+			}
+
+			config, err := NewConfig()
+			if err != nil {
+				t.Fatalf("NewConfig() failed: %v", err)
+			}
+
+			if len(config.PreferredAudioLanguages) != len(tt.expected) {
+				t.Errorf("PreferredAudioLanguages length = %d, want %d",
+					len(config.PreferredAudioLanguages), len(tt.expected))
+				return
+			}
+
+			for i := range config.PreferredAudioLanguages {
+				if config.PreferredAudioLanguages[i] != tt.expected[i] {
+					t.Errorf("PreferredAudioLanguages[%d] = %q, want %q",
+						i, config.PreferredAudioLanguages[i], tt.expected[i])
+				}
+			}
+		})
+	}
+}
+
+// TestNewConfig_LimitToPreferredAudioLanguage tests LIMIT_TO_PREFERRED_AUDIO_LANGUAGE configuration (STORY_05)
+func TestNewConfig_LimitToPreferredAudioLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		expected bool
+		wantErr  bool
+	}{
+		{
+			name:     "default (false)",
+			envValue: "",
+			expected: false,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit true",
+			envValue: "true",
+			expected: true,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit false",
+			envValue: "false",
+			expected: false,
+			wantErr:  false,
+		},
+		{
+			name:     "case insensitive true",
+			envValue: "TRUE",
+			expected: true,
+			wantErr:  false,
+		},
+		{
+			name:     "numeric true",
+			envValue: "1",
+			expected: true,
+			wantErr:  false,
+		},
+		{
+			name:     "numeric false",
+			envValue: "0",
+			expected: false,
+			wantErr:  false,
+		},
+		{
+			name:     "invalid value",
+			envValue: "maybe",
+			expected: false,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue == "" {
+				os.Unsetenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE")
+			} else {
+				os.Setenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE", tt.envValue)
+				defer os.Unsetenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE")
+			}
+
+			config, err := NewConfig()
+
+			if tt.wantErr {
+				if err == nil {
+					t.Error("Expected error, got nil")
+				}
+				return
+			}
+
+			if err != nil {
+				t.Fatalf("NewConfig() failed: %v", err)
+			}
+
+			if config.LimitToPreferredAudioLanguage != tt.expected {
+				t.Errorf("LimitToPreferredAudioLanguage = %v, want %v",
+					config.LimitToPreferredAudioLanguage, tt.expected)
+			}
+		})
+	}
+}
+
+// TestConfig_PreferredAudioLanguagesIntegration tests integration of preferred audio filtering (STORY_05)
+func TestConfig_PreferredAudioLanguagesIntegration(t *testing.T) {
+	// Set both env vars
+	os.Setenv("PREFERRED_AUDIO_LANGUAGES", "eng|jpn")
+	os.Setenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE", "true")
+	defer os.Unsetenv("PREFERRED_AUDIO_LANGUAGES")
+	defer os.Unsetenv("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE")
+
+	config, err := NewConfig()
+	if err != nil {
+		t.Fatalf("NewConfig() failed: %v", err)
+	}
+
+	// Verify preferred languages
+	if len(config.PreferredAudioLanguages) != 2 {
+		t.Errorf("PreferredAudioLanguages length = %d, want 2", len(config.PreferredAudioLanguages))
+	}
+
+	if config.PreferredAudioLanguages[0] != "eng" || config.PreferredAudioLanguages[1] != "jpn" {
+		t.Errorf("PreferredAudioLanguages = %v, want [eng jpn]", config.PreferredAudioLanguages)
+	}
+
+	// Verify limit flag
+	if !config.LimitToPreferredAudioLanguage {
+		t.Error("LimitToPreferredAudioLanguage = false, want true")
+	}
+}

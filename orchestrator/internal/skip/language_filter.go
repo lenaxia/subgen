@@ -130,6 +130,28 @@ func (d *AudioDetector) HasLanguage(tracks []AudioTrack, language string) bool {
 	return false
 }
 
+// HasAnyPreferredLanguage checks if any audio track matches any preferred language
+// Returns true if at least one audio track has a language in the preferred list
+// Returns false if no tracks match or if tracks/preferred is empty
+// This method is used for STORY_05 preferred audio language filtering
+func (d *AudioDetector) HasAnyPreferredLanguage(tracks []AudioTrack, preferredLangs []string) bool {
+	if len(tracks) == 0 || len(preferredLangs) == 0 {
+		return false
+	}
+
+	for _, track := range tracks {
+		if track.Language == "" {
+			continue
+		}
+
+		if MatchesAnyLanguage(track.Language, preferredLangs) {
+			return true
+		}
+	}
+
+	return false
+}
+
 // ParseLanguageList parses a pipe-separated language list
 // "eng|jpn|kor" → ["eng", "jpn", "kor"]
 // Handles whitespace: "eng | jpn | kor" → ["eng", "jpn", "kor"]
