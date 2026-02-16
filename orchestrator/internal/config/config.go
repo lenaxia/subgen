@@ -35,6 +35,12 @@ type Config struct {
 
 	// Skip Configuration
 	Skip SkipConfig
+
+	// Path Mapping Configuration
+	PathMapping PathMappingConfig
+
+	// Monitoring Configuration
+	Monitor MonitorConfig
 }
 
 type PlexConfig struct {
@@ -89,6 +95,21 @@ type SkipConfig struct {
 	SubtitleLanguages        []string
 	AudioLanguages           []string
 	OnlySubgenSubtitles      bool
+}
+
+type PathMappingConfig struct {
+	Enabled bool   // USE_PATH_MAPPING
+	From    string // PATH_MAPPING_FROM - comma-separated source paths
+	To      string // PATH_MAPPING_TO - comma-separated destination paths
+}
+
+type MonitorConfig struct {
+	Enabled           bool
+	TranscribeFolders []string
+	ScanOnStartup     bool
+	StabilityChecks   int
+	StabilityWait     int // seconds
+	StabilityTimeout  int // seconds
 }
 
 // Load reads configuration from environment variables
@@ -168,6 +189,21 @@ func Load() (*Config, error) {
 			AudioLanguages:           parseStringList(v.GetString("SKIP_IF_AUDIO_LANGUAGES")),
 			OnlySubgenSubtitles:      v.GetBool("SKIP_ONLY_SUBGEN_SUBTITLES"),
 		},
+
+		PathMapping: PathMappingConfig{
+			Enabled: v.GetBool("USE_PATH_MAPPING"),
+			From:    v.GetString("PATH_MAPPING_FROM"),
+			To:      v.GetString("PATH_MAPPING_TO"),
+		},
+
+		Monitor: MonitorConfig{
+			Enabled:           v.GetBool("MONITOR"),
+			TranscribeFolders: parseStringListPipe(v.GetString("TRANSCRIBE_FOLDERS")),
+			ScanOnStartup:     v.GetBool("SCAN_ON_STARTUP"),
+			StabilityChecks:   v.GetInt("FILE_STABILITY_CHECKS"),
+			StabilityWait:     v.GetInt("FILE_STABILITY_WAIT"),
+			StabilityTimeout:  v.GetInt("FILE_STABILITY_TIMEOUT"),
+		},
 	}
 
 	// Validate
@@ -233,6 +269,19 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("SKIP_SUBTITLE_LANGUAGES", "")
 	v.SetDefault("SKIP_IF_AUDIO_LANGUAGES", "")
 	v.SetDefault("SKIP_ONLY_SUBGEN_SUBTITLES", false)
+
+	// Path Mapping
+	v.SetDefault("USE_PATH_MAPPING", false)
+	v.SetDefault("PATH_MAPPING_FROM", "")
+	v.SetDefault("PATH_MAPPING_TO", "")
+
+	// Monitoring
+	v.SetDefault("MONITOR", false)
+	v.SetDefault("TRANSCRIBE_FOLDERS", "")
+	v.SetDefault("SCAN_ON_STARTUP", true)
+	v.SetDefault("FILE_STABILITY_CHECKS", 3)
+	v.SetDefault("FILE_STABILITY_WAIT", 2)
+	v.SetDefault("FILE_STABILITY_TIMEOUT", 60)
 }
 
 // validate performs validation on the config struct
@@ -349,6 +398,38 @@ func parseStringList(s string) []string {
 		return []string{}
 	}
 	parts := strings.Split(s, ",")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// parseStringListPipe parses a pipe-separated string into a slice
+func parseStringListPipe(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, "|")
+	result := make([]string, 0, len(parts))
+	for _, part := range parts {
+		trimmed := strings.TrimSpace(part)
+		if trimmed != "" {
+			result = append(result, trimmed)
+		}
+	}
+	return result
+}
+
+// parsePipeSeparatedList parses a pipe-separated string into a slice
+func parsePipeSeparatedList(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	parts := strings.Split(s, "|")
 	result := make([]string, 0, len(parts))
 	for _, part := range parts {
 		trimmed := strings.TrimSpace(part)

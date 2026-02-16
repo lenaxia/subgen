@@ -80,8 +80,8 @@ var mediaExtensions = map[string]bool{
 	".aac":  true,
 }
 
-// isMediaFile checks if a file has a supported media extension
-func isMediaFile(filePath string) bool {
+// IsMediaFile checks if a file has a supported media extension
+func IsMediaFile(filePath string) bool {
 	ext := strings.ToLower(filepath.Ext(filePath))
 	return mediaExtensions[ext]
 }
@@ -128,7 +128,7 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 		}
 
 		// Filter by media extension
-		if !isMediaFile(path) {
+		if !IsMediaFile(path) {
 			return nil
 		}
 

@@ -342,3 +342,61 @@ func TestLoad_PlexQueueMultipleModes(t *testing.T) {
 	assert.Nil(t, config)
 	assert.Contains(t, err.Error(), "only one Plex queue mode")
 }
+
+func TestLoad_MonitoringDefaults(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.False(t, config.Monitor.Enabled)
+	assert.Empty(t, config.Monitor.TranscribeFolders)
+	assert.True(t, config.Monitor.ScanOnStartup)
+	assert.Equal(t, 3, config.Monitor.StabilityChecks)
+	assert.Equal(t, 2, config.Monitor.StabilityWait)
+	assert.Equal(t, 60, config.Monitor.StabilityTimeout)
+}
+
+func TestLoad_MonitoringEnabled(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("MONITOR", "true")
+	os.Setenv("TRANSCRIBE_FOLDERS", "/movies|/tv|/anime")
+	os.Setenv("SCAN_ON_STARTUP", "false")
+	os.Setenv("FILE_STABILITY_CHECKS", "5")
+	os.Setenv("FILE_STABILITY_WAIT", "3")
+	os.Setenv("FILE_STABILITY_TIMEOUT", "120")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, config.Monitor.Enabled)
+	assert.Equal(t, []string{"/movies", "/tv", "/anime"}, config.Monitor.TranscribeFolders)
+	assert.False(t, config.Monitor.ScanOnStartup)
+	assert.Equal(t, 5, config.Monitor.StabilityChecks)
+	assert.Equal(t, 3, config.Monitor.StabilityWait)
+	assert.Equal(t, 120, config.Monitor.StabilityTimeout)
+}
+
+func TestLoad_MonitoringSingleFolder(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("MONITOR", "true")
+	os.Setenv("TRANSCRIBE_FOLDERS", "/data/media")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, config.Monitor.Enabled)
+	assert.Equal(t, []string{"/data/media"}, config.Monitor.TranscribeFolders)
+}

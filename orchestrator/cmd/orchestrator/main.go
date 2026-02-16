@@ -15,6 +15,7 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/discovery"
 	"github.com/mccloud/subgen/orchestrator/internal/grpc_client"
 	"github.com/mccloud/subgen/orchestrator/internal/mediaserver"
+	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/mccloud/subgen/orchestrator/internal/observability"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
 	"github.com/mccloud/subgen/orchestrator/internal/webhooks"
@@ -265,6 +266,79 @@ func main() {
 		}
 	}()
 
+	// Start file monitoring if enabled
+	if cfg.Monitor.Enabled {
+		log.WithFields(logrus.Fields{
+			"folders":      cfg.Monitor.TranscribeFolders,
+			"scan_startup": cfg.Monitor.ScanOnStartup,
+		}).Info("File monitoring enabled")
+
+		// Create monitoring configuration
+		monitorConfig := &monitor.Config{
+			Enabled:          cfg.Monitor.Enabled,
+			Folders:          cfg.Monitor.TranscribeFolders,
+			StabilityChecks:  cfg.Monitor.StabilityChecks,
+			StabilityWait:    time.Duration(cfg.Monitor.StabilityWait) * time.Second,
+			StabilityTimeout: time.Duration(cfg.Monitor.StabilityTimeout) * time.Second,
+		}
+
+		// Create callback for file watcher
+		fileCallback := func(filePath string) {
+			// Create transcription task
+			task := queue.NewTask(filePath, queue.TaskTypeTranscribe)
+
+			if err := taskQueue.Enqueue(task); err != nil {
+				log.WithError(err).Errorf("Failed to enqueue monitored file: %s", filePath)
+			} else {
+				log.WithField("file", filePath).Info("Queued monitored file for transcription")
+			}
+		}
+
+		// Create file watcher
+		watcher, err := monitor.NewFileWatcher(
+			cfg.Monitor.TranscribeFolders,
+			fileCallback,
+			monitorConfig,
+			log,
+		)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to create file watcher")
+		}
+
+		// Perform startup scan if enabled
+		if cfg.Monitor.ScanOnStartup {
+			log.Info("Performing startup scan...")
+
+			// Create queue adapter for scanner
+			queueAdapter := &QueueAdapter{queue: taskQueue}
+			scanner := monitor.NewScannerWithLogger(queueAdapter, nil, log)
+
+			for _, folder := range cfg.Monitor.TranscribeFolders {
+				result, err := scanner.ScanDirectory(folder, true, cfg.Transcription.SubtitleLanguageName)
+				if err != nil {
+					log.WithError(err).Warnf("Startup scan failed for folder: %s", folder)
+					continue
+				}
+
+				log.WithFields(logrus.Fields{
+					"folder":  folder,
+					"scanned": result.Scanned,
+					"queued":  result.Queued,
+					"skipped": result.Skipped,
+				}).Info("Startup scan completed")
+			}
+		}
+
+		// Start file watcher in background
+		go func() {
+			if err := watcher.Watch(ctx); err != nil && err != context.Canceled {
+				log.WithError(err).Error("File watcher stopped unexpectedly")
+			}
+		}()
+
+		log.Info("File monitoring started")
+	}
+
 	log.Info("Orchestrator initialized successfully")
 
 	// Wait for shutdown signal
@@ -455,4 +529,28 @@ func CheckHealth() error {
 	}
 	conn.Close()
 	return nil
+}
+
+// QueueAdapter adapts queue.Queue to monitor.QueueInterface
+type QueueAdapter struct {
+	queue *queue.Queue
+}
+
+// Enqueue implements monitor.QueueInterface
+func (qa *QueueAdapter) Enqueue(task interface{}) error {
+	// Expect task to be a map[string]interface{} with file_path
+	taskMap, ok := task.(map[string]interface{})
+	if !ok {
+		return fmt.Errorf("invalid task type: expected map[string]interface{}")
+	}
+
+	filePath, ok := taskMap["file_path"].(string)
+	if !ok {
+		return fmt.Errorf("invalid task: missing file_path")
+	}
+
+	// Create proper Task object
+	queueTask := queue.NewTask(filePath, queue.TaskTypeTranscribe)
+
+	return qa.queue.Enqueue(queueTask)
 }

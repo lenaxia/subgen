@@ -7,6 +7,7 @@ import (
 	"github.com/gofiber/fiber/v2"
 	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
+	"github.com/mccloud/subgen/orchestrator/internal/util"
 	"github.com/sirupsen/logrus"
 )
 
@@ -33,11 +34,12 @@ type Task struct {
 
 // Server represents the webhook HTTP server
 type Server struct {
-	app     *fiber.App
-	config  *config.Config
-	queue   QueueInterface
-	scanner monitor.Scanner
-	log     *logrus.Logger
+	app        *fiber.App
+	config     *config.Config
+	queue      QueueInterface
+	scanner    monitor.Scanner
+	pathMapper *util.PathMapper
+	log        *logrus.Logger
 }
 
 // NewServer creates a new webhook server instance
@@ -56,12 +58,29 @@ func NewServer(cfg *config.Config, queue QueueInterface, log *logrus.Logger) *Se
 		},
 	})
 
+	// Initialize path mapper
+	pathMapper, err := util.NewPathMapper(
+		cfg.PathMapping.Enabled,
+		cfg.PathMapping.From,
+		cfg.PathMapping.To,
+	)
+	if err != nil {
+		log.WithError(err).Fatal("Failed to initialize path mapper")
+	}
+
+	if pathMapper.Enabled() {
+		log.WithFields(logrus.Fields{
+			"mappings": pathMapper.Mappings(),
+		}).Info("Path mapping enabled")
+	}
+
 	s := &Server{
-		app:     app,
-		config:  cfg,
-		queue:   queue,
-		scanner: nil, // Set via SetScanner() - optional dependency
-		log:     log,
+		app:        app,
+		config:     cfg,
+		queue:      queue,
+		scanner:    nil, // Set via SetScanner() - optional dependency
+		pathMapper: pathMapper,
+		log:        log,
 	}
 
 	s.setupRoutes()
@@ -321,9 +340,25 @@ func (s *Server) handleEmby(c *fiber.Ctx) error {
 		})
 	}
 
+	// Apply path mapping
+	mappedPath, err := s.pathMapper.Map(filePath)
+	if err != nil {
+		s.log.WithError(err).WithFields(logrus.Fields{
+			"original_path": filePath,
+		}).Error("Path mapping failed")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Path mapping failed: %v", err),
+		})
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"original_path": filePath,
+		"mapped_path":   mappedPath,
+	}).Debug("Path mapping applied")
+
 	// Create task
 	task := Task{
-		FilePath: filePath,
+		FilePath: mappedPath,
 	}
 
 	// Queue task
@@ -373,9 +408,25 @@ func (s *Server) handleTautulli(c *fiber.Ctx) error {
 		})
 	}
 
+	// Apply path mapping
+	mappedPath, err := s.pathMapper.Map(file)
+	if err != nil {
+		s.log.WithError(err).WithFields(logrus.Fields{
+			"original_path": file,
+		}).Error("Path mapping failed")
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("Path mapping failed: %v", err),
+		})
+	}
+
+	s.log.WithFields(logrus.Fields{
+		"original_path": file,
+		"mapped_path":   mappedPath,
+	}).Debug("Path mapping applied")
+
 	// Create task
 	task := Task{
-		FilePath: file,
+		FilePath: mappedPath,
 	}
 
 	// Queue task
@@ -397,6 +448,26 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 	language := c.Query("language", "")
 	videoFile := c.Query("video_file", "")
 	output := c.Query("output", "srt")
+
+	// Apply path mapping if video_file is provided
+	if videoFile != "" {
+		mappedPath, err := s.pathMapper.Map(videoFile)
+		if err != nil {
+			s.log.WithError(err).WithFields(logrus.Fields{
+				"original_path": videoFile,
+			}).Error("Path mapping failed for ASR video_file")
+			return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+				"error": fmt.Sprintf("Path mapping failed: %v", err),
+			})
+		}
+
+		s.log.WithFields(logrus.Fields{
+			"original_path": videoFile,
+			"mapped_path":   mappedPath,
+		}).Debug("Path mapping applied for ASR")
+
+		videoFile = mappedPath
+	}
 
 	s.log.WithFields(map[string]interface{}{
 		"task":       taskType,

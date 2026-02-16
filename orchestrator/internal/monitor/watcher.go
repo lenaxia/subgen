@@ -97,6 +97,11 @@ func (fw *FileWatcher) handleFileCreated(filePath string) {
 		return
 	}
 
+	// Filter non-media files
+	if !IsMediaFile(filePath) {
+		return
+	}
+
 	// Handle file creation
 	fw.log.WithField("file", filePath).Info("File created")
 
