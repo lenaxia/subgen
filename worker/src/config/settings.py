@@ -158,12 +158,12 @@ class ProcessingConfig(BaseSettings):
 
     process_added_media: bool = Field(
         default=True,
-        validation_alias="PROCADDEDMEDIA",
+        validation_alias=AliasChoices("PROCESS_ADDED_MEDIA", "PROCADDEDMEDIA"),
         description="Process media when added to library",
     )
     process_media_on_play: bool = Field(
         default=True,
-        validation_alias="PROCMEDIAONPLAY",
+        validation_alias=AliasChoices("PROCESS_MEDIA_ON_PLAY", "PROCMEDIAONPLAY"),
         description="Process media when played",
     )
     monitor_folders: str = Field(
@@ -349,13 +349,13 @@ class SkipConfig(BaseSettings):
     )
     skip_subtitle_languages: str = Field(
         default="",
-        validation_alias="SKIP_LANG_CODES",
-        description="Subtitle languages to skip",
+        validation_alias=AliasChoices("SKIP_SUBTITLE_LANGUAGES", "SKIP_LANG_CODES"),
+        description="Subtitle languages to skip (pipe or comma-separated)",
     )
     skip_audio_languages: str = Field(
         default="",
-        validation_alias="SKIP_IF_AUDIO_LANGUAGES",
-        description="Audio languages to skip",
+        validation_alias=AliasChoices("SKIP_AUDIO_LANGUAGES", "SKIP_IF_AUDIO_LANGUAGES"),
+        description="Audio languages to skip (pipe or comma-separated)",
     )
     skip_only_subgen_subtitles: bool = Field(
         default=False,
@@ -366,13 +366,19 @@ class SkipConfig(BaseSettings):
         description="Skip files with unknown language",
     )
 
-    @field_validator("skip_subtitle_languages", "skip_audio_languages", mode="after")
-    @classmethod
-    def parse_language_list(cls, v: str) -> List[str]:
+    def get_skip_subtitle_languages(self) -> List[str]:
+        """Get skip_subtitle_languages as a list."""
+        return self._parse_language_string(self.skip_subtitle_languages)
+
+    def get_skip_audio_languages(self) -> List[str]:
+        """Get skip_audio_languages as a list."""
+        return self._parse_language_string(self.skip_audio_languages)
+
+    @staticmethod
+    def _parse_language_string(v: str) -> List[str]:
         """Parse pipe or comma-separated language list."""
         if not v or not v.strip():
             return []
-        # Try pipe first, then comma
         if "|" in v:
             return [lang.strip() for lang in v.split("|") if lang.strip()]
         else:
@@ -502,20 +508,49 @@ def load_config(
                 if section in yaml_data:
                     config_dict[section] = yaml_data[section]
 
-            return WorkerSettings(**config_dict)
+            # Temporarily clear environment variables to prevent them from overriding YAML
+            import os
+
+            saved_env = {}
+            env_vars_to_clear = [
+                "WHISPER_MODEL",
+                "TRANSCRIBE_DEVICE",
+                "WHISPER_THREADS",
+                "GRPC_PORT",
+                "WEBHOOKPORT",
+                "PLEXTOKEN",
+                "PLEXSERVER",
+                "PROCADDEDMEDIA",
+                "PROCMEDIAONPLAY",
+                "TRANSCRIBE_FOLDERS",
+                "SKIPIFEXTERNALSUB",
+                "SKIP_LANG_CODES",
+                "SKIP_IF_AUDIO_LANGUAGES",
+                "NAMESUBLANG",
+                "PROCESS_ADDED_MEDIA",
+                "DEBUG",
+            ]
+
+            for var in env_vars_to_clear:
+                if var in os.environ:
+                    saved_env[var] = os.environ[var]
+                    del os.environ[var]
+
+            try:
+                result = WorkerSettings(**config_dict)
+            finally:
+                # Restore environment variables
+                for var, value in saved_env.items():
+                    os.environ[var] = value
+
+            return result
 
         elif env_file and env_file.exists():
-            # Load from .env file - create new instance with custom env_file
-            # We need to load env manually and pass to constructor
-            from dotenv import dotenv_values
+            # Load from .env file using python-dotenv to set env vars
+            from dotenv import load_dotenv
 
-            env_vars = dotenv_values(env_file)
-            # Set env vars temporarily
-            for key, value in env_vars.items():
-                if value is not None:
-                    os.environ[key] = value
-            config = WorkerSettings()
-            return config
+            load_dotenv(env_file, override=True)
+            return WorkerSettings()
 
         else:
             # Load from environment variables

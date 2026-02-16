@@ -92,14 +92,16 @@ def test_health_check_tracks_uptime(grpc_client):
 
 
 def test_detect_language_integration(grpc_client):
-    """Test DetectLanguage RPC (stub implementation returns error)."""
-    request = transcription_pb2.DetectLanguageRequest(file_path="/test/audio.mp3", sample_length=30)
+    """Test DetectLanguage RPC handles file not found error."""
+    request = transcription_pb2.DetectLanguageRequest(
+        file_path="/test/nonexistent.mp3", sample_length=30
+    )
 
     response = grpc_client.DetectLanguage(request)
 
-    # Should return error for now (not implemented)
+    # Should return error when file doesn't exist
     assert response.success is False
-    assert "not yet implemented" in response.error_message.lower()
+    assert "failed to detect language" in response.error_message.lower()
 
 
 def test_detect_language_requires_audio_source_integration(grpc_client):
@@ -115,18 +117,19 @@ def test_detect_language_requires_audio_source_integration(grpc_client):
 
 
 def test_transcribe_integration(grpc_client):
-    """Test Transcribe RPC (stub implementation returns error)."""
+    """Test Transcribe RPC handles file not found error."""
     request = transcription_pb2.TranscribeRequest(
-        file_path="/test/video.mp4",
+        file_path="/test/nonexistent.mp4",
         task_type="transcribe",
         options=transcription_pb2.TranscribeOptions(whisper_model="tiny"),
     )
 
-    response = grpc_client.Transcribe(request)
+    # File doesn't exist, so it should raise an error via context.abort()
+    with pytest.raises(grpc.RpcError) as exc_info:
+        grpc_client.Transcribe(request)
 
-    # Should return error for now (not implemented)
-    assert response.success is False
-    assert "not yet implemented" in response.error_message.lower()
+    assert exc_info.value.code() == grpc.StatusCode.NOT_FOUND
+    assert "file not found" in exc_info.value.details().lower()
 
 
 def test_transcribe_validates_file_path_integration(grpc_client):

@@ -4,6 +4,7 @@ import (
 	"context"
 	"os"
 	"path/filepath"
+	"sync"
 	"testing"
 	"time"
 
@@ -19,10 +20,13 @@ func TestMonitor_Integration_FileDetection(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Track queued files
+	// Track queued files with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
+		mu.Unlock()
 	}
 
 	// Create and start watcher
@@ -52,11 +56,17 @@ func TestMonitor_Integration_FileDetection(t *testing.T) {
 	require.NoError(t, os.WriteFile(file3, []byte("test"), 0644))
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify only media files queued
-	assert.Len(t, queuedFiles, 2, "Should detect 2 media files")
-	assert.Contains(t, queuedFiles, file1, "Should detect mkv file")
-	assert.Contains(t, queuedFiles, file2, "Should detect mp4 file")
-	assert.NotContains(t, queuedFiles, file3, "Should ignore txt file")
+	// Verify only media files queued (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	mu.Unlock()
+
+	assert.Equal(t, 2, filesCount, "Should detect 2 media files")
+	assert.Contains(t, filesCopy, file1, "Should detect mkv file")
+	assert.Contains(t, filesCopy, file2, "Should detect mp4 file")
+	assert.NotContains(t, filesCopy, file3, "Should ignore txt file")
 }
 
 // TestMonitor_Integration_MultipleFolders tests watching multiple directories
@@ -69,10 +79,13 @@ func TestMonitor_Integration_MultipleFolders(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir2)
 
-	// Track queued files
+	// Track queued files with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
+		mu.Unlock()
 	}
 
 	// Create and start watcher
@@ -99,10 +112,16 @@ func TestMonitor_Integration_MultipleFolders(t *testing.T) {
 	require.NoError(t, os.WriteFile(file2, []byte("test"), 0644))
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify both files detected
-	assert.Len(t, queuedFiles, 2, "Should detect files in both folders")
-	assert.Contains(t, queuedFiles, file1, "Should detect file in folder 1")
-	assert.Contains(t, queuedFiles, file2, "Should detect file in folder 2")
+	// Verify both files detected (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	mu.Unlock()
+
+	assert.Equal(t, 2, filesCount, "Should detect files in both folders")
+	assert.Contains(t, filesCopy, file1, "Should detect file in folder 1")
+	assert.Contains(t, filesCopy, file2, "Should detect file in folder 2")
 }
 
 // TestMonitor_Integration_RecursiveDirectory tests deep directory detection
@@ -118,10 +137,13 @@ func TestMonitor_Integration_RecursiveDirectory(t *testing.T) {
 
 	require.NoError(t, os.MkdirAll(subDir3, 0755))
 
-	// Track queued files
+	// Track queued files with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
+		mu.Unlock()
 	}
 
 	// Create and start watcher
@@ -154,12 +176,18 @@ func TestMonitor_Integration_RecursiveDirectory(t *testing.T) {
 	require.NoError(t, os.WriteFile(file4, []byte("test"), 0644))
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify all files detected at different depths
-	assert.Len(t, queuedFiles, 4, "Should detect files at all depths")
-	assert.Contains(t, queuedFiles, file1, "Should detect root level file")
-	assert.Contains(t, queuedFiles, file2, "Should detect level 1 file")
-	assert.Contains(t, queuedFiles, file3, "Should detect level 2 file")
-	assert.Contains(t, queuedFiles, file4, "Should detect level 3 file")
+	// Verify all files detected at different depths (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	mu.Unlock()
+
+	assert.Equal(t, 4, filesCount, "Should detect files at all depths")
+	assert.Contains(t, filesCopy, file1, "Should detect root level file")
+	assert.Contains(t, filesCopy, file2, "Should detect level 1 file")
+	assert.Contains(t, filesCopy, file3, "Should detect level 2 file")
+	assert.Contains(t, filesCopy, file4, "Should detect level 3 file")
 }
 
 // TestMonitor_Integration_Stability tests file stability checking works
@@ -168,12 +196,15 @@ func TestMonitor_Integration_Stability(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Track queued files and timing
+	// Track queued files and timing with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	queueTimes := make([]time.Time, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
 		queueTimes = append(queueTimes, time.Now())
+		mu.Unlock()
 	}
 
 	// Create and start watcher with stability checking
@@ -201,14 +232,25 @@ func TestMonitor_Integration_Stability(t *testing.T) {
 	// Wait for file to be queued
 	time.Sleep(1 * time.Second)
 
-	// Verify file was queued after stability delay
-	require.Len(t, queuedFiles, 1, "File should be queued after stability checks")
-	assert.Contains(t, queuedFiles, file1)
+	// Verify file was queued after stability delay (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	timesCopy := make([]time.Time, len(queueTimes))
+	copy(timesCopy, queueTimes)
+	mu.Unlock()
+
+	require.Equal(t, 1, filesCount, "File should be queued after stability checks")
+	assert.Contains(t, filesCopy, file1)
 
 	// Verify timing - should be at least 2 * stability_wait
 	expectedMinDelay := time.Duration(config.StabilityChecks) * config.StabilityWait
-	actualDelay := queueTimes[0].Sub(startTime)
-	assert.GreaterOrEqual(t, actualDelay, expectedMinDelay, "Should wait for stability before queueing")
+	if len(timesCopy) > 0 {
+		actualDelay := timesCopy[0].Sub(startTime)
+		assert.GreaterOrEqual(t, actualDelay, expectedMinDelay,
+			"File should be queued after stability delay")
+	}
 }
 
 // TestMonitor_Integration_StartupScan tests startup scanning
@@ -247,10 +289,13 @@ func TestMonitor_Integration_NewDirectoryCreated(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Track queued files
+	// Track queued files with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
+		mu.Unlock()
 	}
 
 	// Create and start watcher
@@ -278,9 +323,15 @@ func TestMonitor_Integration_NewDirectoryCreated(t *testing.T) {
 	require.NoError(t, os.WriteFile(file1, []byte("test"), 0644))
 	time.Sleep(200 * time.Millisecond)
 
-	// Verify file detected in dynamically created directory
-	assert.Len(t, queuedFiles, 1, "Should detect file in newly created directory")
-	assert.Contains(t, queuedFiles, file1, "Should detect file in new subdirectory")
+	// Verify file detected in dynamically created directory (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	mu.Unlock()
+
+	assert.Equal(t, 1, filesCount, "Should detect file in newly created directory")
+	assert.Contains(t, filesCopy, file1, "Should detect file in new subdirectory")
 }
 
 // TestMonitor_Integration_SkipLogic tests skip logic integration with file monitoring
@@ -289,10 +340,13 @@ func TestMonitor_Integration_SkipLogic(t *testing.T) {
 	require.NoError(t, err)
 	defer os.RemoveAll(tmpDir)
 
-	// Track queued files
+	// Track queued files with mutex protection
+	var mu sync.Mutex
 	queuedFiles := make([]string, 0)
 	callback := func(path string) {
+		mu.Lock()
 		queuedFiles = append(queuedFiles, path)
+		mu.Unlock()
 	}
 
 	// Create and start watcher (no skip checker at watcher level)
@@ -323,10 +377,16 @@ func TestMonitor_Integration_SkipLogic(t *testing.T) {
 	time.Sleep(200 * time.Millisecond)
 
 	// Verify both files detected by watcher (skip logic happens downstream in scanner/queue)
-	// The watcher just detects all media files and passes them to callback
-	assert.Len(t, queuedFiles, 2, "Watcher should detect all media files")
-	assert.Contains(t, queuedFiles, fileWithSubtitle, "Should detect file with subtitle")
-	assert.Contains(t, queuedFiles, fileWithoutSubtitle, "Should detect file without subtitle")
+	// The watcher just detects all media files and passes them to callback (with mutex protection)
+	mu.Lock()
+	filesCount := len(queuedFiles)
+	filesCopy := make([]string, len(queuedFiles))
+	copy(filesCopy, queuedFiles)
+	mu.Unlock()
+
+	assert.Equal(t, 2, filesCount, "Watcher should detect all media files")
+	assert.Contains(t, filesCopy, fileWithSubtitle, "Should detect file with subtitle")
+	assert.Contains(t, filesCopy, fileWithoutSubtitle, "Should detect file without subtitle")
 
 	// Note: Skip logic filtering happens in Scanner.ScanDirectory() or queue handler,
 	// not in FileWatcher. This test verifies watcher correctly passes all media files.

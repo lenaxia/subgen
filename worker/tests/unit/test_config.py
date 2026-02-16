@@ -413,8 +413,10 @@ class TestSkipConfig:
 
         assert config.skip_if_external_subtitles_exist is False
         assert config.skip_if_target_subtitles_exist is True
-        assert config.skip_subtitle_languages == []
-        assert config.skip_audio_languages == []
+        assert config.skip_subtitle_languages == ""
+        assert config.skip_audio_languages == ""
+        assert config.get_skip_subtitle_languages() == []
+        assert config.get_skip_audio_languages() == []
         assert config.skip_only_subgen_subtitles is False
         assert config.skip_unknown_language is False
 
@@ -431,27 +433,30 @@ class TestSkipConfig:
         monkeypatch.setenv("SKIP_SUBTITLE_LANGUAGES", "eng|spa|fra")
 
         config = SkipConfig()
+        langs = config.get_skip_subtitle_languages()
 
-        assert len(config.skip_subtitle_languages) == 3
-        assert "eng" in config.skip_subtitle_languages
-        assert "spa" in config.skip_subtitle_languages
-        assert "fra" in config.skip_subtitle_languages
+        assert len(langs) == 3
+        assert "eng" in langs
+        assert "spa" in langs
+        assert "fra" in langs
 
     def test_skip_audio_languages_pipe_separated(self, monkeypatch):
         """Test parsing pipe-separated skip audio language list."""
         monkeypatch.setenv("SKIP_IF_AUDIO_LANGUAGES", "eng|jpn")
 
         config = SkipConfig()
+        langs = config.get_skip_audio_languages()
 
-        assert len(config.skip_audio_languages) == 2
+        assert len(langs) == 2
 
     def test_backwards_compatibility_skip_lang_codes(self, monkeypatch):
         """Test legacy SKIP_LANG_CODES environment variable."""
         monkeypatch.setenv("SKIP_LANG_CODES", "eng|spa")
 
         config = SkipConfig()
+        langs = config.get_skip_subtitle_languages()
 
-        assert len(config.skip_subtitle_languages) == 2
+        assert len(langs) == 2
 
 
 class TestModelLifecycleConfig:

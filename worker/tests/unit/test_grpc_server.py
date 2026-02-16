@@ -19,10 +19,30 @@ from grpc_server.service import TranscriptionServicer
 def mock_config():
     """Mock configuration for testing."""
     config = Mock()
-    config.whisper_threads = 4
-    config.memory_threshold_mb = 3000
-    config.model_cleanup_delay = 30
     config.version = "1.0.0"
+
+    # System config
+    config.system = Mock()
+    config.system.memory_threshold_mb = 3000
+    config.system.max_workers = 1
+
+    # Whisper config
+    config.whisper = Mock()
+    config.whisper.model_name = "tiny"
+    config.whisper.model_path = "/tmp/models"
+    config.whisper.device = "cpu"
+    config.whisper.cpu_threads = 4
+    config.whisper.compute_type = "int8"
+
+    # Model lifecycle config
+    config.model_lifecycle = Mock()
+    config.model_lifecycle.cleanup_delay = 30
+    config.model_lifecycle.clear_vram_on_complete = False
+
+    # Transcription config
+    config.transcription = Mock()
+    config.transcription.task = "transcribe"
+
     return config
 
 
@@ -148,15 +168,17 @@ def test_detect_language_uses_default_sample_length(servicer, mock_context):
     assert response is not None
 
 
-def test_detect_language_returns_not_implemented_for_now(servicer, mock_context):
-    """Test DetectLanguage returns error (not yet implemented)."""
-    request = transcription_pb2.DetectLanguageRequest(file_path="/test/audio.mp3", sample_length=30)
+def test_detect_language_handles_file_not_found(servicer, mock_context):
+    """Test DetectLanguage returns error when file doesn't exist."""
+    request = transcription_pb2.DetectLanguageRequest(
+        file_path="/test/nonexistent.mp3", sample_length=30
+    )
 
     response = servicer.DetectLanguage(request, mock_context)
 
     # Should return error response
     assert response.success is False
-    assert "not yet implemented" in response.error_message.lower()
+    assert "failed to detect language" in response.error_message.lower()
 
 
 # ============================================================================
@@ -180,18 +202,20 @@ def test_transcribe_validates_file_path(servicer, mock_context):
 
 
 def test_transcribe_accepts_valid_request(servicer, mock_context):
-    """Test Transcribe accepts valid request structure."""
+    """Test Transcribe accepts valid request structure and handles file not found."""
     request = transcription_pb2.TranscribeRequest(
-        file_path="/test/video.mp4",
+        file_path="/test/nonexistent.mp4",
         task_type="transcribe",
         options=transcription_pb2.TranscribeOptions(whisper_model="tiny"),
     )
 
-    # Should return error response (not implemented yet) but not crash
-    response = servicer.Transcribe(request, mock_context)
+    # Should call abort when file doesn't exist
+    with pytest.raises(grpc.RpcError):
+        servicer.Transcribe(request, mock_context)
 
-    assert response is not None
-    assert isinstance(response, transcription_pb2.TranscribeResponse)
+    mock_context.abort.assert_called_once()
+    args = mock_context.abort.call_args[0]
+    assert args[0] == grpc.StatusCode.NOT_FOUND
 
 
 def test_transcribe_increments_job_statistics(servicer, mock_context):
@@ -214,41 +238,51 @@ def test_transcribe_increments_job_statistics(servicer, mock_context):
     assert servicer.stats["jobs_active"] == initial_active
 
 
-def test_transcribe_returns_not_implemented_for_now(servicer, mock_context):
-    """Test Transcribe returns error (not yet implemented)."""
+def test_transcribe_handles_file_not_found(servicer, mock_context):
+    """Test Transcribe returns error when file doesn't exist."""
     request = transcription_pb2.TranscribeRequest(
-        file_path="/test/video.mp4", task_type="transcribe"
+        file_path="/test/nonexistent.mp4", task_type="transcribe"
     )
 
-    response = servicer.Transcribe(request, mock_context)
+    # Should call abort when file doesn't exist
+    with pytest.raises(grpc.RpcError):
+        servicer.Transcribe(request, mock_context)
 
-    # Should return error response
-    assert response.success is False
-    assert "not yet implemented" in response.error_message.lower()
+    mock_context.abort.assert_called()
+    args = mock_context.abort.call_args[0]
+    assert args[0] == grpc.StatusCode.NOT_FOUND
 
 
 def test_transcribe_handles_optional_force_language(servicer, mock_context):
     """Test Transcribe handles optional force_language parameter."""
     request = transcription_pb2.TranscribeRequest(
-        file_path="/test/video.mp4", task_type="transcribe", force_language="en"
+        file_path="/test/nonexistent.mp4", task_type="transcribe", force_language="en"
     )
 
-    response = servicer.Transcribe(request, mock_context)
+    # Should call abort when file doesn't exist, not crash on force_language
+    with pytest.raises(grpc.RpcError):
+        servicer.Transcribe(request, mock_context)
 
-    # Should not crash with force_language set
-    assert response is not None
+    mock_context.abort.assert_called()
+    args = mock_context.abort.call_args[0]
+    assert args[0] == grpc.StatusCode.NOT_FOUND
 
 
 def test_transcribe_handles_metadata(servicer, mock_context):
     """Test Transcribe accepts metadata dictionary."""
     request = transcription_pb2.TranscribeRequest(
-        file_path="/test/video.mp4", task_type="transcribe", metadata={"plex_item_id": "12345"}
+        file_path="/test/nonexistent.mp4",
+        task_type="transcribe",
+        metadata={"plex_item_id": "12345"},
     )
 
-    response = servicer.Transcribe(request, mock_context)
+    # Should call abort when file doesn't exist, not crash on metadata
+    with pytest.raises(grpc.RpcError):
+        servicer.Transcribe(request, mock_context)
 
-    # Should not crash with metadata
-    assert response is not None
+    mock_context.abort.assert_called()
+    args = mock_context.abort.call_args[0]
+    assert args[0] == grpc.StatusCode.NOT_FOUND
 
 
 # ============================================================================
@@ -263,7 +297,8 @@ def test_servicer_initialization(mock_config):
     assert servicer.config == mock_config
     assert servicer.stats["jobs_processed"] == 0
     assert servicer.stats["jobs_active"] == 0
-    assert servicer.start_time is None  # Set externally by server
+    assert servicer.start_time is not None  # Should be initialized to current time
+    assert isinstance(servicer.start_time, float)
 
 
 def test_servicer_has_all_required_methods(mock_config):
