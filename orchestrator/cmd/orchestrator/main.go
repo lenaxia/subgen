@@ -192,6 +192,13 @@ func main() {
 	// Initialize webhook server
 	webhookServer := webhooks.NewServer(cfg, queueAdapter, log)
 
+	// Set gRPC client and worker pool for language detection endpoint
+	webhookServer.SetGRPCClient(grpcClient)
+
+	// Create worker pool adapter for webhooks
+	webhookWorkerPool := &WebhookWorkerPoolAdapter{pool: workerPool}
+	webhookServer.SetWorkerPool(webhookWorkerPool)
+
 	// Register observability middleware
 	app := webhookServer.App()
 	app.Use(observability.PanicRecoveryMiddleware(log))
@@ -553,4 +560,23 @@ func (qa *QueueAdapter) Enqueue(task interface{}) error {
 	queueTask := queue.NewTask(filePath, queue.TaskTypeTranscribe)
 
 	return qa.queue.Enqueue(queueTask)
+}
+
+// WebhookWorkerPoolAdapter adapts discovery.Pool to webhooks.WorkerPoolInterface
+type WebhookWorkerPoolAdapter struct {
+	pool *discovery.Pool
+}
+
+// SelectWorker implements webhooks.WorkerPoolInterface
+func (a *WebhookWorkerPoolAdapter) SelectWorker() (*webhooks.Worker, error) {
+	worker, err := a.pool.SelectWorker()
+	if err != nil {
+		return nil, err
+	}
+
+	// Convert discovery.Worker to webhooks.Worker
+	return &webhooks.Worker{
+		Address: worker.Address,
+		Healthy: worker.Healthy,
+	}, nil
 }

@@ -60,8 +60,8 @@ func (c *Client) Transcribe(ctx context.Context, workerAddr string, task *queue.
 	return c.transcribeWithClient(ctx, client, task)
 }
 
-// DetectLanguage detects language from audio file
-func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath string) (*pb.DetectLanguageResponse, error) {
+// DetectLanguage detects language from audio file with customizable sample parameters
+func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 	conn, err := c.pool.Get(ctx, workerAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
@@ -69,7 +69,7 @@ func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath
 	defer c.pool.Put(workerAddr, conn)
 
 	client := pb.NewTranscriptionServiceClient(conn)
-	return c.detectLanguageWithClient(ctx, client, filePath)
+	return c.detectLanguageWithClient(ctx, client, filePath, offset, length)
 }
 
 // HealthCheck checks if a worker is healthy
@@ -147,13 +147,13 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 }
 
 // detectLanguageWithClient detects language from audio file (internal method for testing)
-func (c *Client) detectLanguageWithClient(ctx context.Context, client pb.TranscriptionServiceClient, filePath string) (*pb.DetectLanguageResponse, error) {
+func (c *Client) detectLanguageWithClient(ctx context.Context, client pb.TranscriptionServiceClient, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 	req := &pb.DetectLanguageRequest{
 		AudioSource: &pb.DetectLanguageRequest_FilePath{
 			FilePath: filePath,
 		},
-		SampleLength: 30, // 30 seconds sample
-		SampleOffset: 0,
+		SampleLength: int32(length), // Convert float64 to int32
+		SampleOffset: int32(offset), // Convert float64 to int32
 	}
 
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)

@@ -1,13 +1,16 @@
 package webhooks
 
 import (
+	"context"
 	"encoding/json"
 	"fmt"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
+	"github.com/mccloud/subgen/orchestrator/internal/queue"
 	"github.com/mccloud/subgen/orchestrator/internal/util"
+	pb "github.com/mccloud/subgen/orchestrator/pkg/pb"
 	"github.com/sirupsen/logrus"
 )
 
@@ -15,6 +18,29 @@ import (
 // Will be implemented by STORY_04 (Priority Queue System)
 type QueueInterface interface {
 	Enqueue(task Task) error
+	Size() int
+	ProcessingCount() int
+	IsIdle() bool
+	GetTaskInfo(taskID string) *queue.TaskInfo
+	GetAllProcessingTaskInfo() []queue.TaskInfo
+	GetHistory(limit, offset int) []queue.TaskInfo
+	GetHistoryTotal() int
+}
+
+// GRPCClientInterface defines the interface for gRPC worker communication
+type GRPCClientInterface interface {
+	DetectLanguage(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error)
+}
+
+// WorkerPoolInterface defines the interface for worker pool
+type WorkerPoolInterface interface {
+	SelectWorker() (*Worker, error)
+}
+
+// Worker represents a discovered worker
+type Worker struct {
+	Address string
+	Healthy bool
 }
 
 // Task represents a transcription task to be queued
@@ -39,6 +65,8 @@ type Server struct {
 	queue      QueueInterface
 	scanner    monitor.Scanner
 	pathMapper *util.PathMapper
+	grpcClient GRPCClientInterface // For direct worker communication (language detection, etc.)
+	workerPool WorkerPoolInterface // For worker selection
 	log        *logrus.Logger
 }
 
@@ -92,6 +120,16 @@ func (s *Server) SetScanner(scanner monitor.Scanner) {
 	s.scanner = scanner
 }
 
+// SetGRPCClient sets the gRPC client for direct worker communication
+func (s *Server) SetGRPCClient(client GRPCClientInterface) {
+	s.grpcClient = client
+}
+
+// SetWorkerPool sets the worker pool for worker selection
+func (s *Server) SetWorkerPool(pool WorkerPoolInterface) {
+	s.workerPool = pool
+}
+
 // App returns the underlying Fiber app for middleware registration
 func (s *Server) App() *fiber.App {
 	return s.app
@@ -118,6 +156,13 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/tautulli", s.handleTautulli)
 	s.app.Post("/asr", s.handleASR)
 	s.app.Post("/batch", s.handleBatch)
+	s.app.Post("/detect-language", s.handleDetectLanguage)
+
+	// Queue status and monitoring endpoints (STORY_07)
+	s.app.Get("/queue/status", s.handleQueueStatus())
+	s.app.Get("/queue/processing", s.handleQueueProcessing())
+	s.app.Get("/queue/history", s.handleQueueHistory())
+	s.app.Get("/tasks/:id", s.handleTaskStatus())
 }
 
 // Start begins listening for webhook requests
