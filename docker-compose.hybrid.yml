@@ -1,0 +1,133 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+      args:
+        VERSION: ${VERSION:-dev}
+        BUILD_TIME: ${BUILD_TIME:-unknown}
+        GIT_COMMIT: ${GIT_COMMIT:-unknown}
+    container_name: subgen-orchestrator
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # Webhook port
+      - "9090:9090"  # Metrics port
+    environment:
+      # Server Configuration
+      - WEBHOOK_PORT=9000
+      - METRICS_PORT=9090
+      - LOG_LEVEL=info
+      
+      # Media Server Configuration
+      - MEDIA_SERVER_TYPE=${MEDIA_SERVER_TYPE:-plex}
+      - PLEX_URL=${PLEX_URL:-http://plexserver:32400}
+      - PLEX_TOKEN=${PLEX_TOKEN}
+      - JELLYFIN_URL=${JELLYFIN_URL:-http://jellyfin:8096}
+      - JELLYFIN_API_KEY=${JELLYFIN_API_KEY}
+      
+      # Worker Discovery
+      - WORKER_DISCOVERY=localhost
+      - WORKER_ADDRESSES=worker:50051
+      
+      # Processing Configuration
+      - CONCURRENT_TRANSCRIPTIONS=${CONCURRENT_TRANSCRIPTIONS:-2}
+      - QUEUE_SIZE=${QUEUE_SIZE:-100}
+      - GRPC_TIMEOUT=${GRPC_TIMEOUT:-3600}
+      - MAX_RETRIES=${MAX_RETRIES:-3}
+      
+      # Feature Flags
+      - PROC_ADDED_MEDIA=${PROC_ADDED_MEDIA:-true}
+      - PROC_MEDIA_ON_PLAY=${PROC_MEDIA_ON_PLAY:-false}
+      - SKIP_IF_INTERNAL_SUB_LANG=${SKIP_IF_INTERNAL_SUB_LANG:-eng}
+      
+      # Path Mapping
+      - USE_PATH_MAPPING=${USE_PATH_MAPPING:-false}
+      - PATH_MAPPING_FROM=${PATH_MAPPING_FROM:-/tv}
+      - PATH_MAPPING_TO=${PATH_MAPPING_TO:-/tv}
+    volumes:
+      - ${TV:-./data/tv}:/tv
+      - ${MOVIES:-./data/movies}:/movies
+      - ${MUSIC:-./data/music}:/music
+    depends_on:
+      worker:
+        condition: service_healthy
+    networks:
+      - subgen
+    healthcheck:
+      test: ["CMD", "/usr/local/bin/orchestrator", "--health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 5s
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile.fast
+    container_name: subgen-worker
+    restart: unless-stopped
+    expose:
+      - "50051"  # gRPC port (internal only)
+    environment:
+      # gRPC Configuration
+      - GRPC_PORT=50051
+      - GRPC_MAX_WORKERS=${GRPC_MAX_WORKERS:-10}
+      
+      # Whisper Configuration
+      - WHISPER_MODEL=${WHISPER_MODEL:-base}
+      - WHISPER_DEVICE=${WHISPER_DEVICE:-cpu}
+      - COMPUTE_TYPE=${COMPUTE_TYPE:-auto}
+      - BEAM_SIZE=${BEAM_SIZE:-5}
+      - VAD_FILTER=${VAD_FILTER:-true}
+      
+      # Model Management
+      - MODEL_PATH=/models
+      - MODEL_CACHE_DURATION=${MODEL_CACHE_DURATION:-3600}
+      - MODEL_CLEANUP_TIMEOUT=${MODEL_CLEANUP_TIMEOUT:-30}
+      
+      # Audio Processing
+      - AUDIO_SAMPLE_RATE=${AUDIO_SAMPLE_RATE:-16000}
+      - AUDIO_CHANNELS=${AUDIO_CHANNELS:-1}
+      
+      # Subtitle Configuration
+      - NAME_SUB_LANG=${NAME_SUB_LANG:-aa}
+      - WORD_LEVEL_HIGHLIGHT=${WORD_LEVEL_HIGHLIGHT:-false}
+      - LRC_FOR_AUDIO_FILES=${LRC_FOR_AUDIO_FILES:-true}
+      - CUSTOM_REGROUP=${CUSTOM_REGROUP:-cm_sl=84_sl=42++++++1}
+      - USE_MODEL_PROMPT=${USE_MODEL_PROMPT:-false}
+      - CUSTOM_MODEL_PROMPT=${CUSTOM_MODEL_PROMPT:-}
+      
+      # Logging
+      - LOG_LEVEL=${LOG_LEVEL:-INFO}
+      - DEBUG=${DEBUG:-false}
+    volumes:
+      - ${TV:-./data/tv}:/tv
+      - ${MOVIES:-./data/movies}:/movies
+      - ${MUSIC:-./data/music}:/music
+      - ${MODEL_PATH:-./data/models}:/models
+    networks:
+      - subgen
+    healthcheck:
+      test: ["CMD", "python", "-c", "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; channel = grpc.insecure_channel('localhost:50051'); stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); exit(0 if response.status == 1 else 1)"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+    # Uncomment for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+networks:
+  subgen:
+    driver: bridge
+
+volumes:
+  models:
+    driver: local

@@ -1,17 +1,18 @@
 # Core dependencies
 grpcio==1.60.1
 grpcio-tools==1.60.1
-protobuf==4.25.2
+protobuf>=4.25.2,<6.0.0  # Allow newer protobuf versions for compatibility
 
 # ML/Transcription
-faster-whisper==1.0.0
+faster-whisper==1.2.1  # Latest version with better PyAV compatibility
 stable-ts-whisperless==2.17.5
-torch==2.5.1
-torchaudio==2.5.1
+--extra-index-url https://download.pytorch.org/whl/cpu
+torch==2.5.1+cpu  # CPU-only version for faster builds (~300MB vs ~900MB)
+torchaudio==2.5.1+cpu
 
 # Audio processing
 ffmpeg-python==0.2.0
-av==11.0.0
+# av will be installed automatically by faster-whisper
 
 # Configuration
 pydantic==2.5.3

@@ -29,12 +29,12 @@ def serve() -> NoReturn:
     config = get_settings()
 
     # Setup logging
-    setup_logging(config.debug)
+    setup_logging(config.system.debug)
 
     logger.info("Starting Python transcription worker")
-    logger.info(f"gRPC server will listen on {config.grpc_host}:{config.grpc_port}")
-    logger.info(f"Whisper model: {config.whisper_model}")
-    logger.info(f"Device: {config.device}")
+    logger.info(f"gRPC server will listen on 0.0.0.0:{config.system.grpc_port}")
+    logger.info(f"Whisper model: {config.whisper.model_name}")
+    logger.info(f"Device: {config.whisper.device}")
 
     # Create gRPC server and servicer
     server, servicer = create_grpc_server(config)
@@ -43,7 +43,7 @@ def serve() -> NoReturn:
     servicer.start_time = time.time()
 
     # Bind to port
-    server_address = f"{config.grpc_host}:{config.grpc_port}"
+    server_address = f"0.0.0.0:{config.system.grpc_port}"
     server.add_insecure_port(server_address)
 
     # Start server

@@ -1,0 +1,52 @@
+# Optimized Dockerfile using pre-built wheels
+FROM python:3.11
+
+# Install system dependencies
+RUN apt-get update && apt-get install -y \
+    ffmpeg \
+    && rm -rf /var/lib/apt/lists/*
+
+WORKDIR /app
+
+# Install PyTorch with CPU-only pre-built wheels (much faster)
+RUN pip install --no-cache-dir \
+    torch==2.5.1+cpu \
+    torchaudio==2.5.1+cpu \
+    --index-url https://download.pytorch.org/whl/cpu
+
+# Copy requirements and install remaining packages
+COPY requirements.txt /tmp/requirements-orig.txt
+
+# Create filtered requirements (exclude torch, torchaudio, av for now)
+RUN grep -v -E "^(torch|torchaudio|av)==" /tmp/requirements-orig.txt > requirements.txt
+
+# Install remaining Python dependencies
+RUN pip install --no-cache-dir -r requirements.txt
+
+# Now install av with pre-built wheel if available, or skip for now
+RUN pip install --no-cache-dir av==11.0.0 || echo "Warning: PyAV not installed, will use ffmpeg-python fallback"
+
+# Copy application code
+COPY src/ ./src/
+COPY pb/ ./pb/
+
+# Set Python path
+ENV PYTHONPATH=/app/src:/app
+
+# Health check
+HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
+    CMD python -c "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; \
+    channel = grpc.insecure_channel('localhost:50051'); \
+    stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); \
+    response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); \
+    exit(0 if response.status == 1 else 1)"
+
+# Expose gRPC port
+EXPOSE 50051
+
+# Run as non-root user
+RUN useradd -m -u 1000 worker
+USER worker
+
+# Start the worker
+CMD ["python", "-m", "src.main"]

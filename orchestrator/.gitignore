@@ -15,7 +15,7 @@ bin/
 coverage.html
 
 # Dependency directories
-vendor/
+# vendor/ - KEEPING vendor in git for reproducible Docker builds
 
 # Go workspace file
 go.work

@@ -197,6 +197,10 @@ class SystemConfig(BaseSettings):
         populate_by_name=True,
     )
 
+    grpc_host: str = Field(
+        default="0.0.0.0",
+        description="gRPC server host",
+    )
     grpc_port: int = Field(
         default=50051,
         ge=1024,
@@ -412,6 +416,10 @@ class WorkerSettings(BaseSettings):
         env_nested_delimiter="__",
     )
 
+    version: str = Field(
+        default="2026.02.9",
+        description="Worker version",
+    )
     server: ServerConfig = Field(default_factory=ServerConfig)
     whisper: WhisperConfig = Field(default_factory=WhisperConfig)
     processing: ProcessingConfig = Field(default_factory=ProcessingConfig)

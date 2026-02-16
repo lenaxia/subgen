@@ -1,0 +1,38 @@
+# Build artifacts
+bin/
+*.exe
+*.exe~
+*.dll
+*.so
+*.dylib
+
+# Test binaries
+*.test
+*.out
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# Documentation
+*.md
+!README.md
+
+# Development
+.git/
+.gitignore
+
+# Coverage
+coverage.txt
+*.cover
+*.coverage
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Don't ignore vendor (we need it for build)
+!vendor/

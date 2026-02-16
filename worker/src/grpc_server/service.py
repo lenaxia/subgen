@@ -5,12 +5,11 @@ Implements the three RPC methods defined in transcription.proto:
 - Transcribe: Main transcription workload
 - DetectLanguage: Language detection from audio sample
 - HealthCheck: Worker health monitoring
-
-Status: Stub implementation - actual transcription logic will be added in STORY_02
 """
 
 import logging
 import time
+import os
 from typing import Optional
 
 import grpc
@@ -19,6 +18,8 @@ import psutil
 from config.settings import WorkerSettings
 from pb import transcription_pb2
 from pb import transcription_pb2_grpc
+from transcription.model_manager import ModelManager, ModelConfig
+from transcription.engine import TranscriptionEngine, TranscribeOptions
 
 
 logger = logging.getLogger(__name__)
@@ -29,7 +30,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
     gRPC service implementation for transcription worker.
 
     Implements all three RPC methods as defined in the protobuf schema.
-    The actual transcription engine logic will be integrated in STORY_02.
+    Integrates TranscriptionEngine and ModelManager for actual transcription.
     """
 
     def __init__(self, config: WorkerSettings):
@@ -44,10 +45,25 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             "jobs_processed": 0,
             "jobs_active": 0,
         }
-        self.start_time: Optional[float] = None
-        self._model_loaded = False
+        self.start_time: Optional[float] = time.time()
 
-        logger.info("TranscriptionServicer initialized")
+        # Initialize model manager
+        model_config = ModelConfig(
+            model_name=config.whisper.model_name,
+            model_path=str(config.whisper.model_path),
+            device=config.whisper.device,
+            cpu_threads=config.whisper.cpu_threads,
+            num_workers=config.system.max_workers,
+            compute_type=config.whisper.compute_type,
+            cleanup_delay=config.model_lifecycle.cleanup_delay,
+            clear_vram=config.model_lifecycle.clear_vram_on_complete,
+        )
+        self.model_manager = ModelManager(model_config)
+
+        # Initialize transcription engine
+        self.engine = TranscriptionEngine(config)
+
+        logger.info("TranscriptionServicer initialized with model manager")
 
     def HealthCheck(
         self, request: transcription_pb2.HealthCheckRequest, context: grpc.ServicerContext
@@ -81,7 +97,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         response = transcription_pb2.HealthCheckResponse(
             status=status,
             memory_mb=memory_mb,
-            model_loaded=self._model_loaded,
+            model_loaded=self.model_manager.is_loaded(),
             jobs_processed=self.stats["jobs_processed"],
             jobs_active=self.stats["jobs_active"],
             version=self.config.version,
@@ -99,7 +115,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         """
         Detect language from audio sample.
 
-        Stub implementation - actual language detection will be added in STORY_02.
+        Uses the TranscriptionEngine to detect language.
         """
         logger.info("DetectLanguage request received")
 
@@ -116,8 +132,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         # Log the audio source
         if has_file_path:
             logger.debug(f"DetectLanguage: file_path={request.file_path}")
+            source = request.file_path
         else:
             logger.debug(f"DetectLanguage: audio_content={len(request.audio_content)} bytes")
+            source = request.audio_content
 
         # Use default sample length if not specified
         sample_length = request.sample_length if request.sample_length > 0 else 30
@@ -127,11 +145,27 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             f"DetectLanguage: sample_length={sample_length}, sample_offset={sample_offset}"
         )
 
-        # Stub response - actual implementation in STORY_02
-        logger.warning("DetectLanguage: Stub implementation - returning error")
-        return transcription_pb2.DetectLanguageResponse(
-            success=False, error_message="Language detection not yet implemented (STORY_02)"
-        )
+        try:
+            # Load model
+            model = self.model_manager.load()
+            self.engine.model = model
+
+            # Detect language
+            detection_result = self.engine.detect_language(source, sample_length, sample_offset)
+
+            logger.info(f"Language detected: {detection_result.language_code}")
+
+            return transcription_pb2.DetectLanguageResponse(
+                success=True,
+                language_code=detection_result.language_code,
+                confidence=detection_result.confidence,
+            )
+
+        except Exception as e:
+            logger.error(f"Language detection failed: {e}", exc_info=True)
+            return transcription_pb2.DetectLanguageResponse(
+                success=False, error_message=f"Language detection failed: {str(e)}"
+            )
 
     def Transcribe(
         self, request: transcription_pb2.TranscribeRequest, context: grpc.ServicerContext
@@ -139,7 +173,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         """
         Transcribe audio file to subtitles.
 
-        Stub implementation - actual transcription will be added in STORY_02.
+        Uses TranscriptionEngine and ModelManager for actual transcription.
         """
         logger.info(f"Transcribe request received: file_path={request.file_path}")
 
@@ -148,23 +182,94 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             logger.error("Transcribe: file_path is required")
             context.abort(grpc.StatusCode.INVALID_ARGUMENT, "file_path is required")
 
+        # Validate file exists
+        if not os.path.exists(request.file_path):
+            logger.error(f"Transcribe: file not found: {request.file_path}")
+            context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {request.file_path}")
+
         # Log request details
-        logger.debug(f"Transcribe: task_type={request.task_type}")
+        task_type = request.task_type if request.task_type else "transcribe"
+        logger.debug(f"Transcribe: task_type={task_type}")
         logger.debug(f"Transcribe: force_language={request.force_language}")
         if request.metadata:
             logger.debug(f"Transcribe: metadata={dict(request.metadata)}")
-        if request.options:
-            logger.debug(f"Transcribe: whisper_model={request.options.whisper_model}")
 
         # Track active jobs
         self.stats["jobs_active"] += 1
+        start_time = time.time()
 
         try:
-            # Stub response - actual implementation in STORY_02
-            logger.warning("Transcribe: Stub implementation - returning error")
+            # Load model
+            logger.info("Loading Whisper model...")
+            model = self.model_manager.load()
+            self.engine.model = model
+            logger.info("Model loaded successfully")
 
+            # Prepare transcription options
+            options = TranscribeOptions(
+                whisper_model=self.config.whisper.model_name,
+                whisper_threads=self.config.whisper.cpu_threads,
+                word_level_highlight=self.config.transcription.word_level_highlight,
+                lrc_for_audio=self.config.transcription.lrc_for_audio_files,
+                append_footer=self.config.subtitle.append_footer,
+                show_model_in_filename=self.config.subtitle.show_model_in_filename,
+                show_subgen_in_filename=self.config.subtitle.show_subgen_in_filename,
+            )
+
+            # Override with request options if provided
+            if request.options:
+                if request.options.whisper_model:
+                    options.whisper_model = request.options.whisper_model
+                if request.options.word_level_highlight:
+                    options.word_level_highlight = request.options.word_level_highlight
+                if request.options.custom_regroup:
+                    options.custom_regroup = request.options.custom_regroup
+
+            # Perform transcription
+            logger.info(f"Starting transcription for: {request.file_path}")
+            result = self.engine.transcribe(
+                file_path=request.file_path,
+                task_type=task_type,
+                force_language=request.force_language if request.force_language else None,
+                options=options,
+            )
+
+            # Update stats
+            self.stats["jobs_processed"] += 1
+            processing_time = time.time() - start_time
+
+            if result.success:
+                logger.info(
+                    f"Transcription completed successfully: {result.subtitle_path} "
+                    f"({result.segment_count} segments in {processing_time:.2f}s)"
+                )
+
+                # Create stats message
+                stats = transcription_pb2.TranscriptionStats(
+                    duration_seconds=result.duration_seconds,
+                    segment_count=result.segment_count,
+                    transcription_time_ms=result.transcription_time_ms,
+                    peak_memory_mb=result.peak_memory_mb,
+                )
+
+                return transcription_pb2.TranscribeResponse(
+                    success=True,
+                    subtitle_path=result.subtitle_path,
+                    detected_language=result.detected_language,
+                    stats=stats,
+                )
+            else:
+                logger.error(f"Transcription failed: {result.error_message}")
+                return transcription_pb2.TranscribeResponse(
+                    success=False,
+                    error_message=result.error_message,
+                )
+
+        except Exception as e:
+            logger.exception(f"Transcription error: {e}")
             return transcription_pb2.TranscribeResponse(
-                success=False, error_message="Transcription not yet implemented (STORY_02)"
+                success=False,
+                error_message=f"Transcription failed: {str(e)}",
             )
 
         finally:

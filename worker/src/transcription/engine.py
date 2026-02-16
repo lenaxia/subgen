@@ -140,14 +140,29 @@ class TranscriptionEngine:
             # Prepare transcription args
             args = {}
 
-            if options.custom_regroup and options.custom_regroup.lower() != "default":
-                args["regroup"] = options.custom_regroup
+            # Note: regroup is a stable-whisper feature, not available in faster-whisper
+            # We're using stable-whisper wrapper around faster-whisper, so check if regroup is supported
+            # For now, skip custom_regroup since we're using load_faster_whisper
+            # if options.custom_regroup and options.custom_regroup.lower() != "default":
+            #     args["regroup"] = options.custom_regroup
 
             # Transcribe
             lang_code = force_language if force_language else None
-            result = self.model.transcribe(
-                data, language=lang_code, task=task_type, verbose=None, **args
+            # faster-whisper returns (segments_generator, info)
+            segments_generator, info = self.model.transcribe(
+                data, language=lang_code, task=task_type, **args
             )
+
+            # Convert generator to list to get segments
+            segments = list(segments_generator)
+
+            # Create a result object compatible with stable-whisper expectations
+            class FasterWhisperResult:
+                def __init__(self, segments, language):
+                    self.segments = segments
+                    self.language = language
+
+            result = FasterWhisperResult(segments, info.language)
 
             # Append newlines to segments
             append_line_to_result(result)

@@ -35,10 +35,12 @@ func setupLogger() *logrus.Logger {
 // TestFileWatcher_NewFileWatcher tests the constructor creates a valid watcher
 func TestFileWatcher_NewFileWatcher(t *testing.T) {
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 	folders := []string{"/tmp/test1", "/tmp/test2"}
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher(folders, callback, log)
+	watcher, err := monitor.NewFileWatcher(folders, callback, config, log)
 
 	require.NoError(t, err)
 	assert.NotNil(t, watcher)
@@ -46,10 +48,11 @@ func TestFileWatcher_NewFileWatcher(t *testing.T) {
 
 // TestFileWatcher_NewFileWatcher_NilLogger tests constructor with nil logger
 func TestFileWatcher_NewFileWatcher_NilLogger(t *testing.T) {
+	config := monitor.DefaultConfig()
 	folders := []string{"/tmp/test"}
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher(folders, callback, nil)
+	watcher, err := monitor.NewFileWatcher(folders, callback, config, nil)
 
 	assert.Error(t, err)
 	assert.Nil(t, watcher)
@@ -60,6 +63,8 @@ func TestFileWatcher_NewFileWatcher_NilLogger(t *testing.T) {
 func TestFileWatcher_Watch_CreateEvent(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	var callbackMu sync.Mutex
 	var callbackPath string
@@ -69,7 +74,7 @@ func TestFileWatcher_Watch_CreateEvent(t *testing.T) {
 		callbackPath = path
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -111,6 +116,8 @@ func TestFileWatcher_Watch_CreateEvent(t *testing.T) {
 func TestFileWatcher_Watch_MultipleFiles(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	var callbackMu sync.Mutex
 	callbackPaths := []string{}
@@ -120,7 +127,7 @@ func TestFileWatcher_Watch_MultipleFiles(t *testing.T) {
 		callbackPaths = append(callbackPaths, path)
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -158,10 +165,12 @@ func TestFileWatcher_Watch_MultipleFiles(t *testing.T) {
 func TestFileWatcher_Watch_GracefulShutdown(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -190,6 +199,8 @@ func TestFileWatcher_Watch_MultipleFolders(t *testing.T) {
 	testDir1 := setupTestDir(t)
 	testDir2 := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	var callbackMu sync.Mutex
 	callbackPaths := []string{}
@@ -199,7 +210,7 @@ func TestFileWatcher_Watch_MultipleFolders(t *testing.T) {
 		callbackPaths = append(callbackPaths, path)
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir1, testDir2}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir1, testDir2}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -235,11 +246,13 @@ func TestFileWatcher_Watch_MultipleFolders(t *testing.T) {
 // TestFileWatcher_Watch_InvalidFolder tests handling of non-existent folders
 func TestFileWatcher_Watch_InvalidFolder(t *testing.T) {
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 	nonExistentFolder := "/tmp/does_not_exist_" + time.Now().Format("20060102150405")
 
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher([]string{nonExistentFolder}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{nonExistentFolder}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 1*time.Second)
@@ -264,7 +277,9 @@ func TestFileWatcher_Watch_WriteEventIgnored(t *testing.T) {
 		callbackCount++
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -311,7 +326,9 @@ func TestFileWatcher_Watch_ChmodEventIgnored(t *testing.T) {
 		callbackCount++
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -349,6 +366,8 @@ func TestFileWatcher_Watch_ChmodEventIgnored(t *testing.T) {
 func TestFileWatcher_Watch_RemoveEventIgnored(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	callbackCount := 0
 	var callbackMu sync.Mutex
@@ -358,7 +377,7 @@ func TestFileWatcher_Watch_RemoveEventIgnored(t *testing.T) {
 		callbackCount++
 	}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -396,8 +415,10 @@ func TestFileWatcher_Watch_RemoveEventIgnored(t *testing.T) {
 func TestFileWatcher_Watch_NilCallback(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, nil, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, nil, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())
@@ -425,10 +446,12 @@ func TestFileWatcher_Watch_NilCallback(t *testing.T) {
 func TestFileWatcher_Watch_ContextCanceledBeforeStart(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	// Create already-canceled context
@@ -443,9 +466,11 @@ func TestFileWatcher_Watch_ContextCanceledBeforeStart(t *testing.T) {
 // TestFileWatcher_Watch_EmptyFolderList tests behavior with no folders
 func TestFileWatcher_Watch_EmptyFolderList(t *testing.T) {
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 	callback := func(path string) {}
 
-	watcher, err := monitor.NewFileWatcher([]string{}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithTimeout(context.Background(), 500*time.Millisecond)
@@ -460,6 +485,8 @@ func TestFileWatcher_Watch_EmptyFolderList(t *testing.T) {
 func TestFileWatcher_Watch_DuplicateFolder(t *testing.T) {
 	testDir := setupTestDir(t)
 	log := setupLogger()
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0 // Disable for faster tests
 
 	callbackCount := 0
 	var callbackMu sync.Mutex
@@ -470,7 +497,7 @@ func TestFileWatcher_Watch_DuplicateFolder(t *testing.T) {
 	}
 
 	// Add same folder twice
-	watcher, err := monitor.NewFileWatcher([]string{testDir, testDir}, callback, log)
+	watcher, err := monitor.NewFileWatcher([]string{testDir, testDir}, callback, config, log)
 	require.NoError(t, err)
 
 	ctx, cancel := context.WithCancel(context.Background())

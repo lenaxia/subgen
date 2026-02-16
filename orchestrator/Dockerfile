@@ -7,21 +7,21 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Set working directory
 WORKDIR /build
 
-# Copy go mod files
+# Copy go mod files and vendor directory from orchestrator/
 COPY orchestrator/go.mod orchestrator/go.sum ./
-RUN go mod download
-RUN go mod verify
+COPY orchestrator/vendor/ ./vendor/
 
-# Copy source code
-COPY orchestrator/ ./
+# Copy source code from orchestrator/
+COPY orchestrator/ .
 
 # Build arguments for version info
 ARG VERSION=dev
 ARG BUILD_TIME
 ARG GIT_COMMIT
 
-# Build binary
+# Build binary using vendored modules
 RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
+    -mod=vendor \
     -ldflags "-w -s -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
     -o /orchestrator \
     ./cmd/orchestrator

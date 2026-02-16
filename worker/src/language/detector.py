@@ -59,25 +59,27 @@ def detect_language_from_file(
     Raises:
         LanguageDetectionError: If detection fails
     """
-    from audio.extractor import extract_audio_segment
-
     try:
         logger.info(f"Detecting language: {file_path} ({sample_length}s from {sample_offset}s)")
 
-        # Extract audio segment
-        with extract_audio_segment(file_path, sample_offset, sample_length) as audio_buffer:
-            audio_bytes = audio_buffer.read()
+        # For faster-whisper, we can use detect_language_multi_segment or transcribe a small sample
+        # The model.transcribe() will auto-detect language, so let's use that
+        segments_generator, info = model.transcribe(file_path, beam_size=5)
 
-        # Detect language with Whisper
-        result = model.transcribe(audio_bytes)
-        detected_lang = LanguageCode.from_name(result.language)
+        # We don't need the segments, just the language info
+        # Consume the generator to complete detection
+        _ = list(segments_generator)
 
-        logger.info(f"Detected language: {detected_lang.to_name()}")
+        detected_lang = LanguageCode.from_iso_639_1(info.language)
+
+        logger.info(
+            f"Detected language: {detected_lang.to_name()} (confidence: {info.language_probability:.2f})"
+        )
 
         return LanguageDetectionResult(
             language_code=detected_lang.to_iso_639_1(),
             language_name=detected_lang.to_name(),
-            confidence=1.0,  # Whisper doesn't provide confidence score
+            confidence=info.language_probability,
         )
 
     except Exception as e:

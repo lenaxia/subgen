@@ -1,23 +1,33 @@
-# Multi-stage build for Python worker
+# Use Debian Bullseye base for FFmpeg 6.x compatibility with PyAV 11.x
+# Note: python:3.11-slim is based on Debian Trixie which has FFmpeg 7.x
+# We need Bullseye (FFmpeg 6.x) for compatibility with faster-whisper's PyAV dependency
+FROM python:3.11-slim-bullseye
 
-FROM python:3.11-slim AS base
-
-# Install system dependencies
+# Install all dependencies (build + runtime) in one stage
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    gcc \
+    g++ \
+    pkg-config \
+    libavformat-dev \
+    libavcodec-dev \
+    libavdevice-dev \
+    libavutil-dev \
+    libavfilter-dev \
+    libswscale-dev \
+    libswresample-dev \
     && rm -rf /var/lib/apt/lists/*
 
 WORKDIR /app
 
-# Copy requirements
-COPY requirements.txt .
+# Copy and install Python dependencies
+COPY worker/requirements.txt .
+RUN pip install --no-cache-dir --timeout=1000 -r requirements.txt
 
-# Install Python dependencies
-RUN pip install --no-cache-dir -r requirements.txt
-
-# Copy application code
-COPY src/ ./src/
-COPY pb/ ./pb/
+# Copy application code, protobuf files, and shared modules
+COPY worker/src/ ./src/
+COPY worker/pb/ ./pb/
+COPY language_code.py ./
 
 # Set Python path
 ENV PYTHONPATH=/app/src:/app
@@ -33,9 +43,9 @@ HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
 # Expose gRPC port
 EXPOSE 50051
 
-# Run as non-root user
-RUN useradd -m -u 1000 worker
-USER worker
+# TODO: Run as non-root user after fixing permissions
+# RUN useradd -m -u 1000 worker
+# USER worker
 
 # Start the worker
-CMD ["python", "-m", "main"]
+CMD ["python", "-m", "src.main"]

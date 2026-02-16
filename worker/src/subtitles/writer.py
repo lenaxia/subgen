@@ -119,7 +119,7 @@ def write_lrc(segments: Any, output_path: str, append_footer: bool = False) -> N
 
 
 def write_srt(
-    result: Any,  # stable_whisper result object
+    result: Any,  # Transcription result with segments
     output_path: str,
     word_level_highlight: bool = False,
     append_footer: bool = False,
@@ -127,12 +127,12 @@ def write_srt(
     """
     Write SRT subtitle file.
 
-    Uses stable-whisper's to_srt_vtt() method.
+    Manually generates SRT format from segments (compatible with faster-whisper).
 
     Args:
-        result: Transcription result from stable-whisper
+        result: Transcription result with segments attribute
         output_path: Path to write SRT file
-        word_level_highlight: Enable word-level timestamps
+        word_level_highlight: Enable word-level timestamps (not implemented for faster-whisper)
         append_footer: Whether to append generation footer
 
     Raises:
@@ -141,13 +141,34 @@ def write_srt(
     temp_path = output_path + ".tmp"
 
     try:
-        # Use stable-whisper's method
-        result.to_srt_vtt(temp_path, word_level=word_level_highlight)
 
-        # Append footer if requested
-        if append_footer:
-            with open(temp_path, "a", encoding="utf-8") as f:
-                f.write("\n\nTranscribed by Subgen\n")
+        def format_timestamp(seconds: float) -> str:
+            """Convert seconds to SRT timestamp format: HH:MM:SS,mmm"""
+            hours = int(seconds // 3600)
+            minutes = int((seconds % 3600) // 60)
+            secs = int(seconds % 60)
+            millis = int((seconds % 1) * 1000)
+            return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
+
+        with open(temp_path, "w", encoding="utf-8") as f:
+            for i, segment in enumerate(result.segments, start=1):
+                # Write segment index
+                f.write(f"{i}\n")
+
+                # Write timestamps
+                start_time = format_timestamp(segment.start)
+                end_time = format_timestamp(segment.end)
+                f.write(f"{start_time} --> {end_time}\n")
+
+                # Write text (remove embedded newlines)
+                text = segment.text.strip()
+                f.write(f"{text}\n\n")
+
+            # Append footer if requested
+            if append_footer:
+                f.write(f"{len(result.segments) + 1}\n")
+                f.write("99:59:59,999 --> 99:59:59,999\n")
+                f.write("Transcribed by Subgen\n")
 
         # Atomic rename
         os.replace(temp_path, output_path)

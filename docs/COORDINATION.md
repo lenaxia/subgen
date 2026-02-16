@@ -1333,3 +1333,54 @@ go test ./internal/grpc_client/... -race -count=3  # PASS (3x)
 
 ---
 
+
+
+---
+
+### 2026-02-15T18:34:36Z - EPIC_02_INTEGRATION
+
+**Message**: ✅ Worker Config Structure Fixed | ❌ Docker Build Blocked by DNS
+
+**Work Completed**:
+1. ✅ Fixed worker/src/main.py - Nested config structure (config.system.debug, config.whisper.model_name)
+2. ✅ Added missing fields to WorkerSettings - version ("2026.02.9"), grpc_host ("0.0.0.0")
+3. ✅ Fixed worker/Dockerfile - CMD path (python -m src.main)
+4. ✅ Created test-system.sh - 327-line comprehensive validation script
+
+**Test Results**:
+- ✅ Worker imports validated (config loads correctly)
+- ❌ Docker image build BLOCKED - WSL/corporate DNS issue (10.255.255.254 cannot resolve proxy.golang.org)
+
+**Blocking Issue**: DNS Resolution Failure
+- Environment: WSL2 on Amazon corporate network
+- Error: `dial tcp: lookup proxy.golang.org on 10.255.255.254:53: no such host`
+- Impact: Cannot build Go orchestrator image, cannot test full system integration
+- Resolution Required: Fix WSL DNS or vendor Go modules (`go mod vendor`)
+
+**Validation Script Ready**: test-system.sh
+- Builds both images via docker-compose
+- Validates health checks (60s timeout)
+- Sends test Plex webhook
+- Waits for transcription (120s timeout)
+- Validates subtitle output + metrics
+- Full error reporting and cleanup
+- Ready to execute once DNS resolved
+
+**Next Steps** (User Action Required):
+1. Fix DNS: `sudo bash -c 'echo "nameserver 8.8.8.8" > /etc/resolv.conf'`
+2. OR vendor Go modules: `cd orchestrator && go mod vendor` + modify Dockerfile
+3. Build images: `cd test && docker compose -f docker-compose.grpc-test.yml build`
+4. Run validation: `./test-system.sh`
+5. Document results in COORDINATION.md
+
+**Deliverables**:
+- ✅ worker/src/main.py - Fixed
+- ✅ worker/src/config/settings.py - Enhanced
+- ✅ worker/Dockerfile - Fixed
+- ✅ test-system.sh - Created
+- ✅ Work log: docs/WORKLOGS/0012_2026-02-15_worker_config_fix_and_validation_script.md
+
+**Status**: Code fixes complete, system validation blocked by environment DNS issue. All code ready for testing once DNS resolved.
+
+---
+

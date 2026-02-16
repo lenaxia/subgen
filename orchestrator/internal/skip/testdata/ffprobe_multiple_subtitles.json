@@ -1,0 +1,36 @@
+{
+  "streams": [
+    {
+      "index": 0,
+      "codec_type": "video",
+      "codec_name": "h264"
+    },
+    {
+      "index": 1,
+      "codec_type": "subtitle",
+      "codec_name": "ass",
+      "tags": {
+        "language": "eng",
+        "title": "English (Full)"
+      }
+    },
+    {
+      "index": 2,
+      "codec_type": "subtitle",
+      "codec_name": "subrip",
+      "tags": {
+        "language": "jpn",
+        "title": "Japanese"
+      }
+    },
+    {
+      "index": 3,
+      "codec_type": "subtitle",
+      "codec_name": "hdmv_pgs_subtitle",
+      "tags": {
+        "language": "eng",
+        "title": "English (Signs/Songs)"
+      }
+    }
+  ]
+}

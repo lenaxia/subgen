@@ -4,8 +4,8 @@ services:
   # Python worker service
   worker:
     build:
-      context: ../worker
-      dockerfile: Dockerfile
+      context: ..
+      dockerfile: worker/Dockerfile
     container_name: subgen-worker-integration-test
     environment:
       # gRPC Configuration
@@ -33,6 +33,7 @@ services:
     volumes:
       - ./testdata:/testdata:ro           # Read-only test data
       - ../models:/models:rw               # Model storage (shared with host)
+      - ./output:/output:rw                # Writable output directory for subtitles
     healthcheck:
       test: ["CMD", "python", "-c", "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; channel = grpc.insecure_channel('localhost:50051'); stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); exit(0 if response.status == 1 else 1)"]
       interval: 5s
@@ -55,21 +56,23 @@ services:
     environment:
       # Worker Discovery
       WORKER_DISCOVERY: "localhost"
-      PYTHON_WORKER_ADDRESS: "worker:50051"
+      WORKER_ADDRESS: "worker:50051"
       
       # HTTP Server
       WEBHOOK_PORT: "9000"
       METRICS_PORT: "9090"
       
       # Logging
-      LOG_LEVEL: "DEBUG"
+      LOG_LEVEL: "debug"
       
       # Queue Configuration
       QUEUE_MAX_SIZE: "100"
       QUEUE_STALE_TASK_TIMEOUT: "300"
       
-      # Media Servers (disabled for integration tests)
-      PLEX_ENABLED: "false"
+      # Media Servers (minimal config for testing)
+      PLEX_ENABLED: "true"
+      PLEX_URL: "http://localhost:32400"  # Dummy URL for testing
+      PLEX_TOKEN: "dummy-token-for-testing"
       JELLYFIN_ENABLED: "false"
     ports:
       - "9000:9000"

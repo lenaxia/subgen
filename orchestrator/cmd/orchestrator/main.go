@@ -375,6 +375,34 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		"task_type": task.TaskType,
 	}).Info("Dispatching task")
 
+	// Fetch file path from Plex if needed
+	if task.PlexItemID != "" && td.plexClient != nil {
+		filePath, err := td.plexClient.GetFilePath(ctx, task.PlexItemID)
+		if err != nil {
+			td.log.WithError(err).WithField("plex_item_id", task.PlexItemID).Error("Failed to fetch file path from Plex")
+			return
+		}
+		task.FilePath = filePath
+		td.log.WithFields(logrus.Fields{
+			"plex_item_id": task.PlexItemID,
+			"file_path":    filePath,
+		}).Info("Fetched file path from Plex")
+	}
+
+	// Fetch file path from Jellyfin if needed
+	if task.JellyfinItemID != "" && td.jellyfinClient != nil {
+		filePath, err := td.jellyfinClient.GetFilePath(ctx, task.JellyfinItemID)
+		if err != nil {
+			td.log.WithError(err).WithField("jellyfin_item_id", task.JellyfinItemID).Error("Failed to fetch file path from Jellyfin")
+			return
+		}
+		task.FilePath = filePath
+		td.log.WithFields(logrus.Fields{
+			"jellyfin_item_id": task.JellyfinItemID,
+			"file_path":        filePath,
+		}).Info("Fetched file path from Jellyfin")
+	}
+
 	// Select a worker
 	worker, err := td.workerPool.SelectWorker()
 	if err != nil {

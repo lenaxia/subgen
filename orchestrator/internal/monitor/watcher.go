@@ -16,18 +16,24 @@ type FileWatcher struct {
 	watcher  *fsnotify.Watcher
 	folders  []string
 	callback FileCallback
+	config   *Config
 	log      *logrus.Logger
 }
 
 // NewFileWatcher creates a new FileWatcher instance
-func NewFileWatcher(folders []string, callback FileCallback, log *logrus.Logger) (*FileWatcher, error) {
+func NewFileWatcher(folders []string, callback FileCallback, config *Config, log *logrus.Logger) (*FileWatcher, error) {
 	if log == nil {
 		return nil, fmt.Errorf("logger cannot be nil")
+	}
+
+	if config == nil {
+		config = DefaultConfig()
 	}
 
 	return &FileWatcher{
 		folders:  folders,
 		callback: callback,
+		config:   config,
 		log:      log,
 	}, nil
 }
@@ -86,6 +92,12 @@ func (fw *FileWatcher) Watch(ctx context.Context) error {
 // handleFileCreated processes a file creation event
 func (fw *FileWatcher) handleFileCreated(filePath string) {
 	fw.log.WithField("file", filePath).Info("File created")
+
+	// Wait for file stability before processing
+	if !fw.WaitForStability(filePath) {
+		fw.log.WithField("file", filePath).Warn("File failed stability check, skipping")
+		return
+	}
 
 	if fw.callback != nil {
 		fw.callback(filePath)

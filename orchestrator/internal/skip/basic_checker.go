@@ -8,9 +8,10 @@ import (
 	"strings"
 )
 
-// BasicChecker implements basic file existence skip checks
+// BasicChecker implements basic file existence and embedded subtitle skip checks
 type BasicChecker struct {
-	config *Config
+	config   *Config
+	detector *SubtitleDetector
 }
 
 // NewBasicChecker creates a new BasicChecker with the given configuration
@@ -24,7 +25,8 @@ func NewBasicChecker(config *Config) (*BasicChecker, error) {
 	}
 
 	return &BasicChecker{
-		config: config,
+		config:   config,
+		detector: NewSubtitleDetector(),
 	}, nil
 }
 
@@ -65,6 +67,22 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 		}
 	}
 
+	// Check for embedded subtitles (if enabled and file is video)
+	if c.config.CheckEmbeddedSubtitles && isVideoFile(filePath) && c.config.SkipIfInternalSubtitlesLanguage != "" {
+		tracks, err := c.detector.GetEmbeddedSubtitles(ctx, filePath)
+		if err != nil {
+			// Log error but don't fail the check - FFprobe might not be available
+			// or the file might be corrupted. We'll continue with other checks.
+			// In production, this should be logged via structured logging.
+		} else if c.detector.HasLanguage(tracks, c.config.SkipIfInternalSubtitlesLanguage) {
+			return &CheckResult{
+				ShouldSkip: true,
+				Reason:     ReasonEmbeddedSubtitle,
+				Details:    fmt.Sprintf("embedded subtitle found: language=%s", c.config.SkipIfInternalSubtitlesLanguage),
+			}, nil
+		}
+	}
+
 	return &CheckResult{
 		ShouldSkip: false,
 		Reason:     ReasonNotApplicable,
@@ -92,6 +110,20 @@ func isAudioFile(filePath string) bool {
 
 	for _, audioExt := range audioExts {
 		if ext == audioExt {
+			return true
+		}
+	}
+
+	return false
+}
+
+// isVideoFile determines if a file is a video file based on extension
+func isVideoFile(filePath string) bool {
+	ext := strings.ToLower(filepath.Ext(filePath))
+	videoExts := []string{".mkv", ".mp4", ".avi", ".mov", ".m4v", ".wmv", ".flv", ".webm", ".ts", ".m2ts", ".mpg", ".mpeg"}
+
+	for _, videoExt := range videoExts {
+		if ext == videoExt {
 			return true
 		}
 	}

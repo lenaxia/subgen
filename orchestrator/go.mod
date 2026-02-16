@@ -3,11 +3,14 @@ module github.com/mccloud/subgen/orchestrator
 go 1.25.5
 
 require (
+	github.com/fsnotify/fsnotify v1.9.0
 	github.com/gofiber/fiber/v2 v2.52.11
 	github.com/prometheus/client_golang v1.23.2
 	github.com/sirupsen/logrus v1.9.4
 	github.com/spf13/viper v1.21.0
 	github.com/stretchr/testify v1.11.1
+	google.golang.org/grpc v1.79.1
+	google.golang.org/protobuf v1.36.10
 )
 
 require (
@@ -15,7 +18,6 @@ require (
 	github.com/beorn7/perks v1.0.1 // indirect
 	github.com/cespare/xxhash/v2 v2.3.0 // indirect
 	github.com/davecgh/go-spew v1.1.2-0.20180830191138-d8f796af33cc // indirect
-	github.com/fsnotify/fsnotify v1.9.0 // indirect
 	github.com/go-viper/mapstructure/v2 v2.4.0 // indirect
 	github.com/google/uuid v1.6.0 // indirect
 	github.com/klauspost/compress v1.18.0 // indirect
@@ -44,7 +46,5 @@ require (
 	golang.org/x/sys v0.39.0 // indirect
 	golang.org/x/text v0.32.0 // indirect
 	google.golang.org/genproto/googleapis/rpc v0.0.0-20251202230838-ff82c1b0f217 // indirect
-	google.golang.org/grpc v1.79.1 // indirect
-	google.golang.org/protobuf v1.36.10 // indirect
 	gopkg.in/yaml.v3 v3.0.1 // indirect
 )

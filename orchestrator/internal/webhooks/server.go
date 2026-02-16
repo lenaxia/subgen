@@ -6,6 +6,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/mccloud/subgen/orchestrator/internal/config"
+	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,10 +33,11 @@ type Task struct {
 
 // Server represents the webhook HTTP server
 type Server struct {
-	app    *fiber.App
-	config *config.Config
-	queue  QueueInterface
-	log    *logrus.Logger
+	app     *fiber.App
+	config  *config.Config
+	queue   QueueInterface
+	scanner monitor.Scanner
+	log     *logrus.Logger
 }
 
 // NewServer creates a new webhook server instance
@@ -55,14 +57,20 @@ func NewServer(cfg *config.Config, queue QueueInterface, log *logrus.Logger) *Se
 	})
 
 	s := &Server{
-		app:    app,
-		config: cfg,
-		queue:  queue,
-		log:    log,
+		app:     app,
+		config:  cfg,
+		queue:   queue,
+		scanner: nil, // Set via SetScanner() - optional dependency
+		log:     log,
 	}
 
 	s.setupRoutes()
 	return s
+}
+
+// SetScanner sets the scanner instance for batch processing
+func (s *Server) SetScanner(scanner monitor.Scanner) {
+	s.scanner = scanner
 }
 
 // App returns the underlying Fiber app for middleware registration
@@ -90,6 +98,7 @@ func (s *Server) setupRoutes() {
 	s.app.Post("/emby", s.handleEmby)
 	s.app.Post("/tautulli", s.handleTautulli)
 	s.app.Post("/asr", s.handleASR)
+	s.app.Post("/batch", s.handleBatch)
 }
 
 // Start begins listening for webhook requests
