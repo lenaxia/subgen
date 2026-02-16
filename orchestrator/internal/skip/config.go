@@ -35,6 +35,12 @@ type Config struct {
 	// LimitToPreferredAudioLanguage determines whether to only process files with preferred audio
 	// (default: false) - STORY_05
 	LimitToPreferredAudioLanguage bool
+	// SkipUnknownLanguage determines whether to skip files with unknown/undefined language
+	// (default: false) - STORY_06
+	SkipUnknownLanguage bool
+	// SkipIfNoLanguageButSubtitlesExist determines whether to skip files when language cannot be detected
+	// but subtitles already exist (default: false) - STORY_06
+	SkipIfNoLanguageButSubtitlesExist bool
 }
 
 // NewConfig creates a Config from environment variables
@@ -47,6 +53,8 @@ type Config struct {
 // Reads SKIP_IF_AUDIO_LANGUAGES (default: empty)
 // Reads PREFERRED_AUDIO_LANGUAGES (default: empty) - STORY_05
 // Reads LIMIT_TO_PREFERRED_AUDIO_LANGUAGE (default: false) - STORY_05
+// Reads SKIP_UNKNOWN_LANGUAGE (default: false) - STORY_06
+// Reads SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST (default: false) - STORY_06
 func NewConfig() (*Config, error) {
 	skipStr := os.Getenv("SKIP_IF_TARGET_SUBTITLES_EXIST")
 	if skipStr == "" {
@@ -120,16 +128,40 @@ func NewConfig() (*Config, error) {
 		return nil, fmt.Errorf("invalid LIMIT_TO_PREFERRED_AUDIO_LANGUAGE value: %w", err)
 	}
 
+	// Skip unknown language (default: false) - STORY_06
+	skipUnknownLangStr := os.Getenv("SKIP_UNKNOWN_LANGUAGE")
+	if skipUnknownLangStr == "" {
+		skipUnknownLangStr = "false"
+	}
+
+	skipUnknownLang, err := strconv.ParseBool(skipUnknownLangStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SKIP_UNKNOWN_LANGUAGE value: %w", err)
+	}
+
+	// Skip if no language but subtitles exist (default: false) - STORY_06
+	skipNoLangButSubsStr := os.Getenv("SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST")
+	if skipNoLangButSubsStr == "" {
+		skipNoLangButSubsStr = "false"
+	}
+
+	skipNoLangButSubs, err := strconv.ParseBool(skipNoLangButSubsStr)
+	if err != nil {
+		return nil, fmt.Errorf("invalid SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST value: %w", err)
+	}
+
 	return &Config{
-		SkipIfTargetSubtitleExists:      skip,
-		CheckEmbeddedSubtitles:          checkEmbedded,
-		SkipIfInternalSubtitlesLanguage: skipInternalLang,
-		SkipIfExternalSubtitlesExist:    skipExternal,
-		SkipOnlySubgenSubtitles:         skipOnlySubgen,
-		SkipSubtitleLanguages:           skipSubLangs,
-		SkipIfAudioLanguages:            skipAudioLangs,
-		PreferredAudioLanguages:         preferredAudioLangs,
-		LimitToPreferredAudioLanguage:   limitToPreferred,
+		SkipIfTargetSubtitleExists:        skip,
+		CheckEmbeddedSubtitles:            checkEmbedded,
+		SkipIfInternalSubtitlesLanguage:   skipInternalLang,
+		SkipIfExternalSubtitlesExist:      skipExternal,
+		SkipOnlySubgenSubtitles:           skipOnlySubgen,
+		SkipSubtitleLanguages:             skipSubLangs,
+		SkipIfAudioLanguages:              skipAudioLangs,
+		PreferredAudioLanguages:           preferredAudioLangs,
+		LimitToPreferredAudioLanguage:     limitToPreferred,
+		SkipUnknownLanguage:               skipUnknownLang,
+		SkipIfNoLanguageButSubtitlesExist: skipNoLangButSubs,
 	}, nil
 }
 

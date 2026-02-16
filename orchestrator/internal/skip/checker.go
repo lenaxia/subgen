@@ -20,6 +20,10 @@ const (
 	ReasonAudioLanguageSkip SkipReason = "audio_language_in_skip_list"
 	// ReasonAudioLanguageMismatch indicates audio language doesn't match preferred list (STORY_05)
 	ReasonAudioLanguageMismatch SkipReason = "audio_language_mismatch"
+	// ReasonUnknownLanguage indicates language detection failed or returned unknown (STORY_06)
+	ReasonUnknownLanguage SkipReason = "unknown_language"
+	// ReasonNoLanguageButSubtitlesExist indicates no language detected but subtitles exist (STORY_06)
+	ReasonNoLanguageButSubtitlesExist SkipReason = "no_language_but_subtitles_exist"
 	// ReasonNotApplicable indicates skip logic doesn't apply
 	ReasonNotApplicable SkipReason = "not_applicable"
 )

@@ -347,3 +347,158 @@ func TestConfig_PreferredAudioLanguagesIntegration(t *testing.T) {
 		t.Error("LimitToPreferredAudioLanguage = false, want true")
 	}
 }
+
+// TestNewConfig_SkipUnknownLanguage tests SKIP_UNKNOWN_LANGUAGE configuration (STORY_06)
+func TestNewConfig_SkipUnknownLanguage(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name:     "default (false)",
+			envValue: "",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit true",
+			envValue: "true",
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit false",
+			envValue: "false",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "1 means true",
+			envValue: "1",
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name:     "0 means false",
+			envValue: "0",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "invalid value",
+			envValue: "maybe",
+			want:     false,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue != "" {
+				os.Setenv("SKIP_UNKNOWN_LANGUAGE", tt.envValue)
+				defer os.Unsetenv("SKIP_UNKNOWN_LANGUAGE")
+			}
+
+			config, err := NewConfig()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && config.SkipUnknownLanguage != tt.want {
+				t.Errorf("SkipUnknownLanguage = %v, want %v", config.SkipUnknownLanguage, tt.want)
+			}
+		})
+	}
+}
+
+// TestNewConfig_SkipIfNoLanguageButSubtitlesExist tests SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST configuration (STORY_06)
+func TestNewConfig_SkipIfNoLanguageButSubtitlesExist(t *testing.T) {
+	tests := []struct {
+		name     string
+		envValue string
+		want     bool
+		wantErr  bool
+	}{
+		{
+			name:     "default (false)",
+			envValue: "",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit true",
+			envValue: "true",
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name:     "explicit false",
+			envValue: "false",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "1 means true",
+			envValue: "1",
+			want:     true,
+			wantErr:  false,
+		},
+		{
+			name:     "0 means false",
+			envValue: "0",
+			want:     false,
+			wantErr:  false,
+		},
+		{
+			name:     "invalid value",
+			envValue: "yes",
+			want:     false,
+			wantErr:  true,
+		},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			if tt.envValue != "" {
+				os.Setenv("SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST", tt.envValue)
+				defer os.Unsetenv("SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST")
+			}
+
+			config, err := NewConfig()
+			if (err != nil) != tt.wantErr {
+				t.Errorf("NewConfig() error = %v, wantErr %v", err, tt.wantErr)
+				return
+			}
+
+			if !tt.wantErr && config.SkipIfNoLanguageButSubtitlesExist != tt.want {
+				t.Errorf("SkipIfNoLanguageButSubtitlesExist = %v, want %v", config.SkipIfNoLanguageButSubtitlesExist, tt.want)
+			}
+		})
+	}
+}
+
+// TestConfig_AdvancedSkipConditionsIntegration tests integration of advanced skip conditions (STORY_06)
+func TestConfig_AdvancedSkipConditionsIntegration(t *testing.T) {
+	// Set both advanced skip env vars
+	os.Setenv("SKIP_UNKNOWN_LANGUAGE", "true")
+	os.Setenv("SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST", "true")
+	defer os.Unsetenv("SKIP_UNKNOWN_LANGUAGE")
+	defer os.Unsetenv("SKIP_IF_NO_LANGUAGE_BUT_SUBTITLES_EXIST")
+
+	config, err := NewConfig()
+	if err != nil {
+		t.Fatalf("NewConfig() failed: %v", err)
+	}
+
+	// Verify both flags are enabled
+	if !config.SkipUnknownLanguage {
+		t.Error("SkipUnknownLanguage = false, want true")
+	}
+
+	if !config.SkipIfNoLanguageButSubtitlesExist {
+		t.Error("SkipIfNoLanguageButSubtitlesExist = false, want true")
+	}
+}
