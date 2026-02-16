@@ -1,6 +1,7 @@
 package webhooks
 
 import (
+	"context"
 	"encoding/json"
 	"net/http/httptest"
 	"os"
@@ -9,10 +10,39 @@ import (
 
 	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
+	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// mockSkipChecker implements skip.Checker for testing
+type mockSkipChecker struct {
+	shouldSkip bool
+	skipReason skip.SkipReason
+}
+
+func (msc *mockSkipChecker) Check(ctx context.Context, filePath string) (*skip.CheckResult, error) {
+	return &skip.CheckResult{
+		ShouldSkip: msc.shouldSkip,
+		Reason:     msc.skipReason,
+		Details:    "mock skip check",
+	}, nil
+}
+
+func (msc *mockSkipChecker) GetConfig() *skip.Config {
+	return nil
+}
+
+// mockMonitorQueue implements monitor.QueueInterface for testing
+type mockMonitorQueue struct {
+	enqueuedTasks []interface{}
+}
+
+func (mmq *mockMonitorQueue) Enqueue(task interface{}) error {
+	mmq.enqueuedTasks = append(mmq.enqueuedTasks, task)
+	return nil
+}
 
 // TestBatchEndpointIntegration tests the full batch endpoint with real scanner
 func TestBatchEndpointIntegration(t *testing.T) {
@@ -52,11 +82,15 @@ func TestBatchEndpointIntegration(t *testing.T) {
 	log.SetLevel(logrus.ErrorLevel) // Suppress logs
 
 	server := NewServer(cfg, queue, log)
-	scanner := monitor.NewScanner(queue, nil) // No skip checker
+
+	// Create scanner with mockMonitorQueue
+	monitorQueue := &mockMonitorQueue{}
+	scanner := monitor.NewScanner(monitorQueue, nil) // No skip checker
 	server.SetScanner(scanner)
 
 	// Test 1: Non-recursive scan
 	t.Run("NonRecursiveScan", func(t *testing.T) {
+		monitorQueue.enqueuedTasks = nil
 		req := httptest.NewRequest("POST", "/batch?directory="+testDir, nil)
 		resp, err := server.App().Test(req)
 		require.NoError(t, err)
@@ -71,11 +105,9 @@ func TestBatchEndpointIntegration(t *testing.T) {
 		assert.Equal(t, float64(0), result["skipped"], "Should skip 0 files (no skip checker)")
 	})
 
-	// Reset queue for next test
-	queue.EnqueuedTasks = nil
-
 	// Test 2: Recursive scan
 	t.Run("RecursiveScan", func(t *testing.T) {
+		monitorQueue.enqueuedTasks = nil
 		req := httptest.NewRequest("POST", "/batch?directory="+testDir+"&recursive=true", nil)
 		resp, err := server.App().Test(req)
 		require.NoError(t, err)
@@ -91,7 +123,7 @@ func TestBatchEndpointIntegration(t *testing.T) {
 
 	// Test 3: Language parameter
 	t.Run("WithLanguageParameter", func(t *testing.T) {
-		queue.EnqueuedTasks = nil
+		monitorQueue.enqueuedTasks = nil
 		req := httptest.NewRequest("POST", "/batch?directory="+testDir+"&language=en", nil)
 		resp, err := server.App().Test(req)
 		require.NoError(t, err)
@@ -101,7 +133,7 @@ func TestBatchEndpointIntegration(t *testing.T) {
 		require.NoError(t, err)
 
 		assert.Equal(t, "success", result["status"])
-		assert.Greater(t, len(queue.EnqueuedTasks), 0, "Should queue at least one task")
+		assert.Greater(t, len(monitorQueue.enqueuedTasks), 0, "Should queue at least one task")
 	})
 }
 
@@ -120,7 +152,7 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// Setup server with mock skip checker that skips all files
+	// Setup server
 	cfg := &config.Config{
 		WebhookPort: 9000,
 	}
@@ -129,11 +161,14 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 	log.SetLevel(logrus.ErrorLevel)
 
 	server := NewServer(cfg, queue, log)
-	skipChecker := &MockSkipChecker{
-		ShouldSkip: true, // Skip all files
-		SkipReason: "subtitle_file_exists",
+
+	// Create scanner with mock skip checker that skips all files
+	monitorQueue := &mockMonitorQueue{}
+	skipChecker := &mockSkipChecker{
+		shouldSkip: true, // Skip all files
+		skipReason: skip.ReasonSubtitleExists,
 	}
-	scanner := monitor.NewScanner(queue, skipChecker)
+	scanner := monitor.NewScanner(monitorQueue, skipChecker)
 	server.SetScanner(scanner)
 
 	// Execute batch scan
@@ -152,7 +187,7 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 	assert.Equal(t, float64(3), result["skipped"], "Should skip 3 files")
 
 	skipReasons := result["skip_reasons"].(map[string]interface{})
-	assert.Greater(t, skipReasons["subtitle_file_exists"], float64(0), "Should track skip reasons")
+	assert.Greater(t, skipReasons[string(skip.ReasonSubtitleExists)], float64(0), "Should track skip reasons")
 }
 
 // TestBatchEndpointErrorCases tests various error scenarios
@@ -163,7 +198,10 @@ func TestBatchEndpointErrorCases(t *testing.T) {
 	log.SetLevel(logrus.ErrorLevel)
 
 	server := NewServer(cfg, queue, log)
-	scanner := monitor.NewScanner(queue, nil)
+
+	// Create scanner for tests that need it
+	monitorQueue := &mockMonitorQueue{}
+	scanner := monitor.NewScanner(monitorQueue, nil)
 	server.SetScanner(scanner)
 
 	t.Run("NonexistentDirectory", func(t *testing.T) {
