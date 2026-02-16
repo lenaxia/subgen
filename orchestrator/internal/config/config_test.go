@@ -278,3 +278,67 @@ func TestLoad_WithEmptyArrayFields(t *testing.T) {
 	assert.Empty(t, config.Skip.SubtitleLanguages)
 	assert.Empty(t, config.Skip.AudioLanguages)
 }
+
+func TestLoad_PlexQueueNextEpisode(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("PLEX_QUEUE_NEXT_EPISODE", "true")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.True(t, config.Plex.QueueNextEpisode)
+	assert.False(t, config.Plex.QueueSeason)
+	assert.False(t, config.Plex.QueueSeries)
+}
+
+func TestLoad_PlexQueueSeason(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("PLEX_QUEUE_SEASON", "true")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.False(t, config.Plex.QueueNextEpisode)
+	assert.True(t, config.Plex.QueueSeason)
+	assert.False(t, config.Plex.QueueSeries)
+}
+
+func TestLoad_PlexQueueSeries(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("PLEX_QUEUE_SERIES", "true")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	require.NoError(t, err)
+	assert.False(t, config.Plex.QueueNextEpisode)
+	assert.False(t, config.Plex.QueueSeason)
+	assert.True(t, config.Plex.QueueSeries)
+}
+
+func TestLoad_PlexQueueMultipleModes(t *testing.T) {
+	// Setup
+	os.Clearenv()
+	os.Setenv("PLEX_TOKEN", "test-token")
+	os.Setenv("PLEX_QUEUE_NEXT_EPISODE", "true")
+	os.Setenv("PLEX_QUEUE_SEASON", "true")
+
+	// Test
+	config, err := Load()
+
+	// Assert
+	assert.Error(t, err)
+	assert.Nil(t, config)
+	assert.Contains(t, err.Error(), "only one Plex queue mode")
+}

@@ -41,6 +41,11 @@ type PlexConfig struct {
 	Token   string
 	Server  string
 	Enabled bool
+
+	// Episode queueing
+	QueueNextEpisode bool
+	QueueSeason      bool
+	QueueSeries      bool
 }
 
 type JellyfinConfig struct {
@@ -112,9 +117,12 @@ func Load() (*Config, error) {
 		LogLevel:    v.GetString("LOG_LEVEL"),
 
 		Plex: PlexConfig{
-			Token:   v.GetString("PLEX_TOKEN"),
-			Server:  v.GetString("PLEX_SERVER"),
-			Enabled: v.GetBool("PLEX_ENABLED"),
+			Token:            v.GetString("PLEX_TOKEN"),
+			Server:           v.GetString("PLEX_SERVER"),
+			Enabled:          v.GetBool("PLEX_ENABLED"),
+			QueueNextEpisode: v.GetBool("PLEX_QUEUE_NEXT_EPISODE"),
+			QueueSeason:      v.GetBool("PLEX_QUEUE_SEASON"),
+			QueueSeries:      v.GetBool("PLEX_QUEUE_SERIES"),
 		},
 
 		Jellyfin: JellyfinConfig{
@@ -183,6 +191,9 @@ func setDefaults(v *viper.Viper) {
 	// Plex
 	v.SetDefault("PLEX_ENABLED", true)
 	v.SetDefault("PLEX_SERVER", "http://localhost:32400")
+	v.SetDefault("PLEX_QUEUE_NEXT_EPISODE", false)
+	v.SetDefault("PLEX_QUEUE_SEASON", false)
+	v.SetDefault("PLEX_QUEUE_SERIES", false)
 
 	// Jellyfin
 	v.SetDefault("JELLYFIN_ENABLED", false)
@@ -250,6 +261,11 @@ func validate(config *Config) error {
 		return fmt.Errorf("PLEX_TOKEN is required when PLEX_ENABLED=true")
 	}
 
+	// Validate Plex queue configuration
+	if err := validatePlexQueueConfig(&config.Plex); err != nil {
+		return err
+	}
+
 	// Required: Jellyfin token if Jellyfin enabled
 	if config.Jellyfin.Enabled && config.Jellyfin.Token == "" {
 		return fmt.Errorf("JELLYFIN_TOKEN is required when JELLYFIN_ENABLED=true")
@@ -269,6 +285,28 @@ func validate(config *Config) error {
 		if !strings.Contains(config.Worker.Address, ":") {
 			return fmt.Errorf("WORKER_ADDRESS must include port (e.g., localhost:50051)")
 		}
+	}
+
+	return nil
+}
+
+// validatePlexQueueConfig validates Plex queue configuration
+func validatePlexQueueConfig(config *PlexConfig) error {
+	// Count how many queue modes are enabled
+	count := 0
+	if config.QueueNextEpisode {
+		count++
+	}
+	if config.QueueSeason {
+		count++
+	}
+	if config.QueueSeries {
+		count++
+	}
+
+	// Only one mode can be enabled at a time
+	if count > 1 {
+		return fmt.Errorf("only one Plex queue mode can be enabled at a time (PLEX_QUEUE_NEXT_EPISODE, PLEX_QUEUE_SEASON, PLEX_QUEUE_SERIES)")
 	}
 
 	return nil
