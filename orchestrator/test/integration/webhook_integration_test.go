@@ -12,6 +12,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/prometheus/client_golang/prometheus"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -69,8 +70,9 @@ func setupTestEnv(t *testing.T) *testEnv {
 		},
 	}
 
-	// Create metrics
-	metrics := queue.NewQueueMetrics()
+	// Create metrics with custom registry (avoids collisions in tests)
+	registry := prometheus.NewRegistry()
+	metrics := queue.NewQueueMetricsWithRegistry(registry)
 
 	// Create queue
 	q := queue.NewQueue(cfg.Queue.MaxSize, metrics, log)
@@ -490,7 +492,9 @@ func TestPlex_QueueFull(t *testing.T) {
 		},
 	}
 
-	metrics := queue.NewQueueMetrics()
+	// Create metrics with custom registry
+	registry := prometheus.NewRegistry()
+	metrics := queue.NewQueueMetricsWithRegistry(registry)
 	q := queue.NewQueue(cfg.Queue.MaxSize, metrics, log)
 
 	// Fill queue
