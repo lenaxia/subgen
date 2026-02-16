@@ -30,27 +30,37 @@ func NewConnectionPool(maxConns int) *ConnectionPool {
 
 // Get retrieves or creates a connection to worker
 func (p *ConnectionPool) Get(ctx context.Context, addr string) (*grpc.ClientConn, error) {
-	// Try to get existing connection
+	// Fast path: Try to get existing healthy connection with read lock
 	p.mu.RLock()
 	conn, exists := p.conns[addr]
-	p.mu.RUnlock()
-
-	if exists && conn.GetState() != connectivity.Shutdown {
-		return conn, nil
+	if exists {
+		// Check state while still holding read lock to avoid race
+		state := conn.GetState()
+		p.mu.RUnlock()
+		if state != connectivity.Shutdown {
+			return conn, nil
+		}
+	} else {
+		p.mu.RUnlock()
 	}
 
-	// Create new connection
+	// Slow path: Create new connection with write lock
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	// Double-check after acquiring write lock
+	// Double-check after acquiring write lock (another goroutine may have created it)
 	conn, exists = p.conns[addr]
-	if exists && conn.GetState() != connectivity.Shutdown {
-		return conn, nil
+	if exists {
+		state := conn.GetState()
+		if state != connectivity.Shutdown {
+			return conn, nil
+		}
+		// Connection is shutdown, remove it and create new one
+		delete(p.conns, addr)
 	}
 
 	// Dial new connection
-	conn, err := grpc.DialContext(ctx, addr,
+	newConn, err := grpc.DialContext(ctx, addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
 			Time:                10 * time.Second,
@@ -62,9 +72,9 @@ func (p *ConnectionPool) Get(ctx context.Context, addr string) (*grpc.ClientConn
 		return nil, fmt.Errorf("failed to dial worker: %w", err)
 	}
 
-	p.conns[addr] = conn
+	p.conns[addr] = newConn
 
-	return conn, nil
+	return newConn, nil
 }
 
 // Put returns a connection to the pool (no-op, keeps conn alive)

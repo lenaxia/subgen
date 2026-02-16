@@ -53,10 +53,16 @@ type WorkerConfig struct {
 	Discovery string
 	Address   string
 	Timeout   int // seconds
+
+	// Kubernetes-specific fields
+	Namespace   string
+	ServiceName string
+	Port        int32
 }
 
 type QueueConfig struct {
-	MaxSize int
+	MaxSize             int
+	MaxAudioContentSize int64 // Maximum size in bytes for ASR audio uploads (default 100MB)
 }
 
 type TranscriptionConfig struct {
@@ -118,13 +124,17 @@ func Load() (*Config, error) {
 		},
 
 		Worker: WorkerConfig{
-			Discovery: v.GetString("WORKER_DISCOVERY"),
-			Address:   v.GetString("WORKER_ADDRESS"),
-			Timeout:   v.GetInt("WORKER_TIMEOUT"),
+			Discovery:   v.GetString("WORKER_DISCOVERY"),
+			Address:     v.GetString("WORKER_ADDRESS"),
+			Timeout:     v.GetInt("WORKER_TIMEOUT"),
+			Namespace:   v.GetString("WORKER_NAMESPACE"),
+			ServiceName: v.GetString("WORKER_SERVICE_NAME"),
+			Port:        int32(v.GetInt("WORKER_PORT")),
 		},
 
 		Queue: QueueConfig{
-			MaxSize: v.GetInt("QUEUE_MAX_SIZE"),
+			MaxSize:             v.GetInt("QUEUE_MAX_SIZE"),
+			MaxAudioContentSize: v.GetInt64("QUEUE_MAX_AUDIO_CONTENT_SIZE"),
 		},
 
 		Transcription: TranscriptionConfig{
@@ -182,9 +192,13 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("WORKER_DISCOVERY", "localhost")
 	v.SetDefault("WORKER_ADDRESS", "localhost:50051")
 	v.SetDefault("WORKER_TIMEOUT", 18000) // 5 hours
+	v.SetDefault("WORKER_NAMESPACE", "media")
+	v.SetDefault("WORKER_SERVICE_NAME", "subgen-worker")
+	v.SetDefault("WORKER_PORT", 50051)
 
 	// Queue
 	v.SetDefault("QUEUE_MAX_SIZE", 1000)
+	v.SetDefault("QUEUE_MAX_AUDIO_CONTENT_SIZE", 100*1024*1024) // 100MB default
 
 	// Transcription
 	v.SetDefault("WHISPER_MODEL", "medium")

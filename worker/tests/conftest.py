@@ -2,9 +2,16 @@
 pytest configuration and fixtures for worker tests.
 """
 
+import sys
+from pathlib import Path
 import pytest
 from typing import Generator
 from unittest.mock import MagicMock
+
+# Add parent directories to Python path for imports
+worker_dir = Path(__file__).parent.parent
+sys.path.insert(0, str(worker_dir / "src"))
+sys.path.insert(0, str(worker_dir))
 
 
 @pytest.fixture
@@ -19,6 +26,7 @@ def mock_config() -> MagicMock:
     config.memory_threshold_mb = 3000
     config.model_cleanup_delay = 30
     config.clear_vram_on_complete = True
+    config.version = "1.0.0"
     return config
 
 

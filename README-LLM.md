@@ -69,21 +69,87 @@ All essential information is consolidated here. Additional docs are referenced f
 
 ```
 subgen/
+├── .venv/              # Python virtual environment (create with: python3 -m venv .venv)
 ├── subgen.py           # Main application (2144 lines) - FastAPI server + transcription logic
 ├── launcher.py         # Bootstrap script (183 lines) - handles updates, setup, environment
 ├── language_code.py    # Language code management (199 lines) - enum-based language handling
 ├── requirements.txt    # Python dependencies (10 packages)
+├── requirements-dev.txt # Development dependencies (pytest, mypy, ruff)
+├── pytest.ini          # pytest configuration
+├── .coveragerc         # Test coverage configuration
 ├── subgen.env          # Default environment variables
 ├── Dockerfile          # GPU-enabled Docker image (CUDA 12.3.2)
 ├── Dockerfile.cpu      # CPU-only Docker image (multi-stage build for smaller size)
 ├── docker-compose.yml  # Example Docker Compose configuration
 ├── entrypoint.sh       # Docker entrypoint with rootless support
 ├── subgen.xml          # Unraid template configuration
+├── tests/              # Test infrastructure (EPIC_00)
+│   ├── conftest.py     # Shared pytest fixtures
+│   ├── unit/           # Unit tests
+│   ├── integration/    # Integration tests
+│   └── e2e/            # End-to-end tests
+├── orchestrator/       # Go orchestrator (EPIC_01)
+│   ├── cmd/orchestrator/
+│   ├── internal/       # Internal packages
+│   └── go.mod
+├── worker/             # Python worker (EPIC_02)
+│   ├── src/            # Source code
+│   ├── tests/          # Worker-specific tests
+│   └── requirements.txt
 ├── .github/workflows/  # CI/CD pipelines
 │   ├── build_GPU.yml   # Auto-build GPU Docker image
 │   ├── build_CPU.yml   # Auto-build CPU Docker image (multi-arch: amd64, arm64)
+│   ├── build-go.yml    # Go orchestrator CI
 │   └── calver.yml      # Auto-update version on every commit
 └── README.md           # User-facing documentation
+```
+
+## 🛠️ Development Setup
+
+### Python Development Environment
+
+```bash
+# Create virtual environment (REQUIRED for development)
+python3 -m venv .venv
+
+# Activate virtual environment
+source .venv/bin/activate  # Linux/Mac
+# OR
+.venv\Scripts\activate     # Windows
+
+# Install dependencies
+pip install -r requirements.txt       # Production dependencies
+pip install -r requirements-dev.txt   # Development dependencies (pytest, mypy, ruff)
+
+# Run tests
+pytest tests/ -v                      # All tests
+pytest tests/unit/ -v                 # Unit tests only
+pytest --cov=. --cov-report=html      # With coverage report
+
+# Type checking
+mypy language_code.py subgen.py
+
+# Linting
+ruff check .
+```
+
+### Go Development Environment
+
+```bash
+# Navigate to orchestrator
+cd orchestrator
+
+# Install dependencies
+go mod download
+
+# Build
+go build -o bin/orchestrator ./cmd/orchestrator
+
+# Run tests
+go test ./... -v
+
+# Run with race detector
+go test ./... -race
 ```
 
 ---
