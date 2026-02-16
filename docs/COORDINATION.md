@@ -943,4 +943,131 @@ QUEUE_MAX_AUDIO_CONTENT_SIZE=104857600  # 100MB default
 **Status**: Error handling production-ready. Configuration 70% complete with clear path to 100%.
 
 ---
+### 2026-02-15T23:45:00Z - EPIC_02
+**Message**: ✅ STORY_05 100% COMPLETE - Configuration & Error Handling
+
+**Context**: Completed all remaining configuration fixes, achieving 100% test pass rate (93/93 tests passing).
+
+**Final Deliverables (4 files, 1,787 lines)**:
+1. ✅ `worker/src/utils/errors.py` (314 lines) - Complete error handling
+2. ✅ `worker/src/config/settings.py` (561 lines) - Complete configuration system
+3. ✅ `worker/tests/unit/test_config.py` (594 lines) - 62 tests (100% passing)
+4. ✅ `worker/tests/unit/test_errors.py` (318 lines) - 31 tests (100% passing)
+
+**Final Test Results**:
+- Configuration tests: 62/62 passing ✅ (100%)
+- Error handling tests: 31/31 passing ✅ (100%)
+- **Total: 93/93 tests passing ✅ (100%)**
+
+**Coverage**:
+- errors.py: 99% covered
+- settings.py: 98% covered
+
+**Fixes Applied**:
+1. ✅ Fixed model_config in all BaseSettings classes (`extra="allow"`, `populate_by_name=True`)
+2. ✅ Fixed backwards compatibility using AliasChoices for priority (PLEX_TOKEN > PLEXTOKEN)
+3. ✅ Fixed list field parsing (changed to str type with @field_validator for pipe/comma separation)
+4. ✅ Fixed YAML serialization (convert lists to pipe-separated strings in to_yaml())
+5. ✅ Fixed error message paths (env var → nested config path mapping)
+
+**Configuration Features**:
+- 8 nested config classes (Server, Whisper, Processing, System, Transcription, Subtitle, Skip, ModelLifecycle)
+- 40+ environment variables with full backwards compatibility
+- Pipe and comma-separated list parsing (SKIP_SUBTITLE_LANGUAGES="eng|spa|fra")
+- .env file support
+- YAML file save/load with round-trip validation
+- Comprehensive validation (port ranges, enum values, type checking)
+- User-friendly error messages with field suggestions
+- Nested error paths (whisper.model_name, system.grpc_port)
+
+**Time Spent**: 3 hours total (2.5h initial + 0.5h fixes, estimated 6-8h, 50% ahead)
+
+**Integration Status**:
+- ✅ Error handling fully integrated and working
+- ✅ Configuration fully integrated and working
+- ✅ All downstream consumers updated (server.py, service.py)
+
+**Work Log**: docs/WORKLOGS/0006_2026-02-15_EPIC_02_story_05_configuration_error_handling.md
+
+**Status**: STORY_05 100% complete. All acceptance criteria met. Production-ready.
+
+---
+
+### 2026-02-15T17:30:00Z - EPIC_01
+**Message**: ✅ STORY_07 & STORY_08 COMPLETE - gRPC Client + Observability
+
+**Context**: Successfully implemented final 2 stories to complete EPIC_01 core implementation. Both stories delivered ahead of schedule with high test coverage and production-ready code.
+
+**STORY_07: gRPC Client (3.5h vs 6-8h estimate, 56% faster)**:
+- ✅ Generated Go protobuf code from api/transcription.proto (29KB + 8.5KB)
+- ✅ Implemented TranscriptionClient with all 3 RPC methods (Transcribe, DetectLanguage, HealthCheck)
+- ✅ Connection pooling with double-checked locking (max 10 connections per worker)
+- ✅ Retry logic with exponential backoff (1s → 2s → 4s, max 3 retries)
+- ✅ Configurable timeouts (5hr transcribe, 5s health)
+- ✅ Prometheus metrics: subgen_grpc_calls_total, subgen_grpc_errors_total, subgen_grpc_duration_seconds
+- ✅ 18 comprehensive tests (100% passing, 78.9% coverage)
+- ✅ Integration-ready with worker pool and queue
+- ✅ Retries only on transient gRPC errors (Unavailable, DeadlineExceeded, etc.)
+
+**STORY_08: Observability (2h vs 4-6h estimate, 60% faster)**:
+- ✅ Prometheus metrics for HTTP (requests, duration, in-flight counter)
+- ✅ Worker metrics (count, healthy count)
+- ✅ Request logging middleware (structured logs with logrus)
+- ✅ Panic recovery middleware (graceful error handling)
+- ✅ /health endpoint (liveness probe - uptime check)
+- ✅ /ready endpoint (readiness probe - checks workers availability)
+- ✅ /queue endpoint (queue status: size, processing, idle state)
+- ✅ 8 comprehensive tests (100% passing, 98.0% coverage)
+- ✅ Kubernetes-ready (probe configurations documented)
+
+**Total Test Results**:
+- New Tests: 26 (18 grpc_client + 8 observability)
+- Pass Rate: 100% (26/26 passing)
+- Coverage: 78.9-98% (exceeds 70% requirement)
+- All packages compile successfully
+
+**Key Technical Achievements**:
+1. Connection pooling prevents connection overhead on repeated RPC calls
+2. Exponential backoff reduces worker load during transient failures
+3. Metrics provide comprehensive visibility into RPC and HTTP performance
+4. Health checks enable Kubernetes liveness and readiness probes
+5. Panic recovery prevents cascading failures
+6. Test isolation via custom Prometheus registries
+
+**Files Created** (11 files, ~1,500 lines):
+- orchestrator/pkg/pb/ (2 generated files)
+- orchestrator/internal/grpc_client/ (5 files: client, pool, metrics + tests)
+- orchestrator/internal/observability/ (3 files: main + tests + doc)
+- docs/WORKLOGS/0007 & 0008 - Detailed work logs
+
+**Integration Points**:
+- gRPC client uses queue.Task for requests
+- Observability defines WorkerPool and Queue interfaces
+- Metrics ready for Prometheus scraping on :9090
+- Health endpoints ready for Kubernetes probes on :9000
+
+**Validation**:
+- ✅ All orchestrator tests pass (go test ./...)
+- ✅ No compile errors (go build ./...)
+- ✅ High code coverage (78.9-98%)
+- ✅ Work logs created for both stories
+
+**Next Steps for EPIC_01**:
+1. Integrate middleware into webhooks server
+2. Wire all components together in main.go
+3. End-to-end test with real Python worker
+4. Update EPIC_01 README with completion status
+
+**Time Investment**: 5.5 hours total (3.5h + 2h)
+**Estimated Time**: 10-14 hours combined
+**Efficiency**: 55% faster than estimate (TDD + focused scope)
+
+**Status**: EPIC_01 core implementation COMPLETE. Ready for integration and E2E testing.
+
+**Work Logs**: 
+- docs/WORKLOGS/0007_2026-02-15_STORY_07_grpc_client_complete.md
+- docs/WORKLOGS/0008_2026-02-15_STORY_08_observability_complete.md
+- docs/EPIC_01_FINAL_COMPLETION_SUMMARY.md
+
+---
 
