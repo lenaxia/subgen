@@ -418,3 +418,94 @@ func TestCleanupStaleTasks_EmptyQueue(t *testing.T) {
 	assert.Equal(t, 0, cleaned)
 	assert.Equal(t, 0, q.ProcessingCount())
 }
+
+// TestQueue_GetTaskInfo verifies retrieving task info
+func TestQueue_GetTaskInfo(t *testing.T) {
+	q := newTestQueue(100)
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+	task.ID = "task-123"
+
+	err := q.Enqueue(task)
+	require.NoError(t, err)
+
+	// Get task info while queued
+	info := q.GetTaskInfo("task-123")
+	require.NotNil(t, info)
+	assert.Equal(t, "task-123", info.ID)
+	assert.Equal(t, "/media/movie.mkv", info.FilePath)
+	assert.Equal(t, TaskStatusQueued, info.Status)
+	assert.Equal(t, 2, info.Priority) // TaskTypeTranscribe = priority 2
+
+	// Dequeue and check processing status
+	_, err = q.Dequeue()
+	require.NoError(t, err)
+
+	info = q.GetTaskInfo("task-123")
+	require.NotNil(t, info)
+	assert.Equal(t, TaskStatusProcessing, info.Status)
+}
+
+// TestQueue_GetAllProcessingTaskInfo verifies getting all processing tasks
+func TestQueue_GetAllProcessingTaskInfo(t *testing.T) {
+	q := newTestQueue(100)
+	
+	task1 := NewTask("/media/movie1.mkv", TaskTypeTranscribe)
+	task2 := NewTask("/media/movie2.mkv", TaskTypeASR)
+	task3 := NewTask("/media/movie3.mkv", TaskTypeDetectLanguage)
+
+	// Enqueue and dequeue all tasks (move to processing)
+	q.Enqueue(task1)
+	q.Enqueue(task2)
+	q.Enqueue(task3)
+
+	q.Dequeue()
+	q.Dequeue()
+	q.Dequeue()
+
+	// Get all processing tasks
+	processingTasks := q.GetAllProcessingTaskInfo()
+	assert.Len(t, processingTasks, 3)
+
+	// Verify all are in processing status
+	for _, info := range processingTasks {
+		assert.Equal(t, TaskStatusProcessing, info.Status)
+	}
+}
+
+// TestQueue_MarkDone_AddsToHistory verifies completed tasks are added to history
+func TestQueue_MarkDone_AddsToHistory(t *testing.T) {
+	q := newTestQueue(100)
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+
+	// Queue, dequeue, then mark done
+	q.Enqueue(task)
+	dequeued, _ := q.Dequeue()
+	
+	err := q.MarkDone(dequeued.ID)
+	require.NoError(t, err)
+
+	// Task should now be in history
+	info := q.GetTaskInfo(dequeued.ID)
+	require.NotNil(t, info)
+	assert.Equal(t, TaskStatusCompleted, info.Status)
+	assert.NotNil(t, info.CompletedAt)
+}
+
+// TestQueue_MarkFailed_AddsToHistory verifies failed tasks are added to history
+func TestQueue_MarkFailed_AddsToHistory(t *testing.T) {
+	q := newTestQueue(100)
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+
+	// Queue, dequeue, then mark failed
+	q.Enqueue(task)
+	dequeued, _ := q.Dequeue()
+	
+	err := q.MarkFailed(dequeued.ID, errors.New("test error"))
+	require.NoError(t, err)
+
+	// Task should now be in history with error
+	info := q.GetTaskInfo(dequeued.ID)
+	require.NotNil(t, info)
+	assert.Equal(t, TaskStatusFailed, info.Status)
+	assert.Contains(t, info.Error, "test error")
+}

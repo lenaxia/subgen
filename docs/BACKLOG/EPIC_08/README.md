@@ -283,17 +283,35 @@ Content-Type: audio/mpeg
 ---
 
 ### [STORY_05: ASR Format Selection](./stories/STORY_05_asr_format_selection.md)
-**Status:** Not Started  
-**Effort:** 3-4 hours  
+**Status:** BLOCKED (Requires STORY_10)  
+**Effort:** 1-2 hours (after STORY_10)  
 **Priority:** MEDIUM  
 **Summary:** Allow format selection on ASR endpoint for Bazarr integration
 
+**Blocker:** STORY_10 (Blocking ASR Infrastructure) must complete first
+
 **Acceptance Criteria:**
-- [ ] Query parameter: `?output=srt` (default), `?output=vtt`, `?output=lrc`
-- [ ] Return subtitle in requested format
-- [ ] Still block until completion
+- [ ] Query parameter: `?output=srt|vtt|lrc|txt|tsv|json`
+- [ ] Use format writers to convert segments
+- [ ] Return formatted subtitles instead of placeholder
 - [ ] Content-Type headers match format
-- [ ] Works with existing ASR deduplication
+- [ ] Works with blocking mechanism from STORY_10
+
+---
+
+### [STORY_10: Blocking ASR Infrastructure](./stories/STORY_10_blocking_asr_infrastructure.md)
+**Status:** Not Started  
+**Effort:** 4-5 hours  
+**Priority:** HIGH (Blocks STORY_05)  
+**Summary:** Implement blocking mechanism for ASR endpoint to wait for transcription results
+
+**Acceptance Criteria:**
+- [ ] Add ResultChan to Task struct for blocking operations
+- [ ] ASR endpoint blocks until transcription completes
+- [ ] Timeout handling (30 second default, configurable)
+- [ ] Worker processor sends results to result channels
+- [ ] Concurrent ASR requests work independently
+- [ ] No memory leaks from abandoned channels
 
 **API Enhancement:**
 ```http
@@ -631,7 +649,7 @@ curl http://localhost:9000/queue/status
 
 ## Definition of Done
 
-- [ ] All 9 stories completed with ✅ status
+- [ ] All 10 stories completed with ✅ status (STORY_10 added for blocking ASR)
 - [ ] 6 subtitle formats supported (SRT, LRC, VTT, TXT, TSV, JSON)
 - [ ] Batch processing endpoint functional
 - [ ] Plex episode queueing working

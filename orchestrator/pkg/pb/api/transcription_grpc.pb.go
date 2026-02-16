@@ -4,7 +4,7 @@
 // - protoc             v4.25.1
 // source: api/transcription.proto
 
-package pb
+package v1
 
 import (
 	context "context"

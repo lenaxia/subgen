@@ -95,3 +95,97 @@ func TestCheckContextCancellation(t *testing.T) {
 	// Error handling depends on implementation
 	// For now, we just verify the call doesn't panic
 }
+
+// Benchmarks for STORY_07 performance requirements
+
+// BenchmarkBasicChecker_Check_FileExists benchmarks basic file existence check
+// Target: < 50ms per operation
+func BenchmarkBasicChecker_Check_FileExists(b *testing.B) {
+	config := &Config{
+		SkipIfTargetSubtitleExists: true,
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		b.Fatalf("Failed to create BasicChecker: %v", err)
+	}
+
+	ctx := context.Background()
+	filePath := "testdata/video.mkv"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.Check(ctx, filePath)
+	}
+}
+
+// BenchmarkBasicChecker_Check_EmbeddedDetection benchmarks embedded subtitle detection
+// Target: < 100ms per operation
+func BenchmarkBasicChecker_Check_EmbeddedDetection(b *testing.B) {
+	config := &Config{
+		SkipIfTargetSubtitleExists:      true,
+		CheckEmbeddedSubtitles:          true,
+		SkipIfInternalSubtitlesLanguage: "eng",
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		b.Fatalf("Failed to create BasicChecker: %v", err)
+	}
+
+	ctx := context.Background()
+	filePath := "testdata/video_with_subs.mkv"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.Check(ctx, filePath)
+	}
+}
+
+// BenchmarkBasicChecker_Check_ExternalScan benchmarks external subtitle scanning
+// Target: < 200ms per operation
+func BenchmarkBasicChecker_Check_ExternalScan(b *testing.B) {
+	config := &Config{
+		SkipIfTargetSubtitleExists:      true,
+		SkipIfExternalSubtitlesExist:    true,
+		SkipIfInternalSubtitlesLanguage: "eng",
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		b.Fatalf("Failed to create BasicChecker: %v", err)
+	}
+
+	ctx := context.Background()
+	filePath := "testdata/video.mkv"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.Check(ctx, filePath)
+	}
+}
+
+// BenchmarkBasicChecker_Check_AllChecks benchmarks full skip check with all features
+func BenchmarkBasicChecker_Check_AllChecks(b *testing.B) {
+	config := &Config{
+		SkipIfTargetSubtitleExists:      true,
+		CheckEmbeddedSubtitles:          true,
+		SkipIfExternalSubtitlesExist:    true,
+		SkipIfInternalSubtitlesLanguage: "eng",
+		SkipIfAudioLanguages:            []string{"jpn"},
+		SkipUnknownLanguage:             true,
+	}
+
+	checker, err := NewBasicChecker(config)
+	if err != nil {
+		b.Fatalf("Failed to create BasicChecker: %v", err)
+	}
+
+	ctx := context.Background()
+	filePath := "testdata/video.mkv"
+
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		_, _ = checker.Check(ctx, filePath)
+	}
+}

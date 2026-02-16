@@ -1,15 +1,21 @@
 package webhooks
 
 import (
+	_ "bytes" // STORY_05: Will be used for formatting ASR responses
 	"context"
 	"encoding/json"
 	"fmt"
+	"time"
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
+	"github.com/mccloud/subgen/orchestrator/internal/observability"
+	"github.com/mccloud/subgen/orchestrator/internal/plex"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
+	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/mccloud/subgen/orchestrator/internal/util"
+	_ "github.com/mccloud/subgen/orchestrator/pkg/formats" // STORY_05: Will be used for formatting ASR responses
 	pb "github.com/mccloud/subgen/orchestrator/pkg/pb"
 	"github.com/sirupsen/logrus"
 )
@@ -54,20 +60,25 @@ type Task struct {
 	JellyfinItemID    string
 	JellyfinServer    string
 	JellyfinToken     string
-	AudioContent      []byte            // For ASR tasks (Bazarr upload)
-	ASROptions        map[string]string // ASR query parameters
+	AudioContent      []byte                          // For ASR tasks (Bazarr upload)
+	ASROptions        map[string]string               // ASR query parameters
+	ResultChan        chan *queue.TranscriptionResult // For blocking operations (ASR)
 }
 
 // Server represents the webhook HTTP server
 type Server struct {
-	app        *fiber.App
-	config     *config.Config
-	queue      QueueInterface
-	scanner    monitor.Scanner
-	pathMapper *util.PathMapper
-	grpcClient GRPCClientInterface // For direct worker communication (language detection, etc.)
-	workerPool WorkerPoolInterface // For worker selection
-	log        *logrus.Logger
+	app           *fiber.App
+	config        *config.Config
+	queue         QueueInterface
+	scanner       monitor.Scanner
+	pathMapper    *util.PathMapper
+	grpcClient    GRPCClientInterface    // For direct worker communication (language detection, etc.)
+	workerPool    WorkerPoolInterface    // For worker selection
+	skipChecker   skip.Checker           // For skip logic integration (STORY_07)
+	metrics       *observability.Metrics // For observability metrics (STORY_07)
+	plexClient    *plex.Client           // Plex API client (STORY_03)
+	episodeQueuer *plex.EpisodeQueuer    // Episode queueing (STORY_03)
+	log           *logrus.Logger
 }
 
 // NewServer creates a new webhook server instance
@@ -111,6 +122,13 @@ func NewServer(cfg *config.Config, queue QueueInterface, log *logrus.Logger) *Se
 		log:        log,
 	}
 
+	// Initialize Plex client and episode queuer if Plex is configured (STORY_03)
+	if cfg.Plex.Server != "" && cfg.Plex.Token != "" {
+		s.plexClient = plex.NewClient(cfg.Plex.Server, cfg.Plex.Token)
+		s.episodeQueuer = plex.NewEpisodeQueuer(s.plexClient, log)
+		log.WithField("plex_server", cfg.Plex.Server).Info("Plex client initialized")
+	}
+
 	s.setupRoutes()
 	return s
 }
@@ -128,6 +146,16 @@ func (s *Server) SetGRPCClient(client GRPCClientInterface) {
 // SetWorkerPool sets the worker pool for worker selection
 func (s *Server) SetWorkerPool(pool WorkerPoolInterface) {
 	s.workerPool = pool
+}
+
+// SetSkipChecker sets the skip checker for skip logic integration
+func (s *Server) SetSkipChecker(checker skip.Checker) {
+	s.skipChecker = checker
+}
+
+// SetMetrics sets the metrics for observability
+func (s *Server) SetMetrics(metrics *observability.Metrics) {
+	s.metrics = metrics
 }
 
 // App returns the underlying Fiber app for middleware registration
@@ -263,6 +291,50 @@ func (s *Server) handlePlex(c *fiber.Ctx) error {
 		PlexToken:  s.config.Plex.Token,
 	}
 
+	// STORY_07 LIMITATION: Skip checking for Plex requires fetching file path from Plex API first
+	// The Plex webhook only provides a ratingKey (item ID), not a file path.
+	// To implement skip checking here, we would need to:
+	// 1. Call Plex API with ratingKey to get file path: GET /library/metadata/{ratingKey}
+	// 2. Extract file path from the API response
+	// 3. Apply path mapping to convert Plex's path to local path
+	// 4. Run skip check on the mapped path
+	// 5. If skipped, increment metrics and return early
+	//
+	// This is deferred because it requires:
+	// - Plex API client implementation
+	// - Authentication token management
+	// - Error handling for API failures
+	// - Testing with live Plex instances
+	//
+	// For now, skip checking is only available for Emby/Tautulli webhooks which
+	// provide file paths directly in their payloads.
+	//
+	// if s.skipChecker != nil && s.plexClient != nil {
+	//     filePath, err := s.plexClient.GetFilePath(c.Context(), ratingKey)
+	//     if err != nil {
+	//         s.log.WithError(err).Warn("Failed to fetch file path from Plex")
+	//     } else {
+	//         mappedPath, err := s.pathMapper.Map(filePath)
+	//         if err != nil {
+	//             s.log.WithError(err).Warn("Path mapping failed for Plex file")
+	//         } else {
+	//             result, err := s.skipChecker.Check(c.Context(), mappedPath)
+	//             if err != nil {
+	//                 s.log.WithError(err).Warn("Skip check failed, continuing with queue")
+	//             } else if result.ShouldSkip {
+	//                 s.log.WithFields(logrus.Fields{
+	//                     "reason":  result.Reason,
+	//                     "details": result.Details,
+	//                 }).Info("File skipped")
+	//                 if s.metrics != nil {
+	//                     s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
+	//                 }
+	//                 return c.SendString("")
+	//             }
+	//         }
+	//     }
+	// }
+
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
 		s.log.WithError(err).Error("Failed to enqueue Plex task")
@@ -272,6 +344,52 @@ func (s *Server) handlePlex(c *fiber.Ctx) error {
 	}
 
 	s.log.WithField("rating_key", ratingKey).Info("Plex task queued")
+
+	// STORY_03: Queue additional episodes if episode queueing is configured
+	if s.episodeQueuer != nil && s.plexClient != nil {
+		queueMode := s.getPlexQueueMode()
+		if queueMode != "" {
+			s.log.WithFields(logrus.Fields{
+				"rating_key": ratingKey,
+				"mode":       queueMode,
+			}).Debug("Attempting to queue additional episodes")
+
+			itemIDs, err := s.episodeQueuer.QueueEpisodes(c.Context(), ratingKey, queueMode)
+			if err != nil {
+				s.log.WithError(err).Warn("Failed to queue additional episodes")
+			} else if len(itemIDs) > 0 {
+				// Queue each additional episode
+				for _, itemID := range itemIDs {
+					filePath, err := s.episodeQueuer.GetFilePath(c.Context(), itemID)
+					if err != nil {
+						s.log.WithError(err).WithField("item_id", itemID).Warn("Failed to get file path for episode")
+						continue
+					}
+
+					// Apply path mapping
+					mappedPath, err := s.pathMapper.Map(filePath)
+					if err != nil {
+						s.log.WithError(err).WithField("item_id", itemID).Warn("Failed to map path for episode")
+						continue
+					}
+
+					episodeTask := Task{
+						FilePath:   mappedPath,
+						PlexItemID: itemID,
+						PlexServer: s.config.Plex.Server,
+						PlexToken:  s.config.Plex.Token,
+					}
+
+					if err := s.queue.Enqueue(episodeTask); err != nil {
+						s.log.WithError(err).WithField("item_id", itemID).Warn("Failed to enqueue additional episode")
+					} else {
+						s.log.WithField("item_id", itemID).Debug("Additional episode queued")
+					}
+				}
+			}
+		}
+	}
+
 	return c.SendString("")
 }
 
@@ -316,6 +434,50 @@ func (s *Server) handleJellyfin(c *fiber.Ctx) error {
 		JellyfinServer: s.config.Jellyfin.Server,
 		JellyfinToken:  s.config.Jellyfin.Token,
 	}
+
+	// STORY_07 LIMITATION: Skip checking for Jellyfin requires fetching file path from Jellyfin API first
+	// The Jellyfin webhook only provides an ItemId, not a file path.
+	// To implement skip checking here, we would need to:
+	// 1. Call Jellyfin API with ItemId to get file path: GET /Items/{itemId}
+	// 2. Extract file path from the API response (Path field in MediaSources)
+	// 3. Apply path mapping to convert Jellyfin's path to local path
+	// 4. Run skip check on the mapped path
+	// 5. If skipped, increment metrics and return early
+	//
+	// This is deferred because it requires:
+	// - Jellyfin API client implementation
+	// - Authentication token management
+	// - Error handling for API failures
+	// - Testing with live Jellyfin instances
+	//
+	// For now, skip checking is only available for Emby/Tautulli webhooks which
+	// provide file paths directly in their payloads.
+	//
+	// if s.skipChecker != nil && s.jellyfinClient != nil {
+	//     filePath, err := s.jellyfinClient.GetFilePath(c.Context(), itemID)
+	//     if err != nil {
+	//         s.log.WithError(err).Warn("Failed to fetch file path from Jellyfin")
+	//     } else {
+	//         mappedPath, err := s.pathMapper.Map(filePath)
+	//         if err != nil {
+	//             s.log.WithError(err).Warn("Path mapping failed for Jellyfin file")
+	//         } else {
+	//             result, err := s.skipChecker.Check(c.Context(), mappedPath)
+	//             if err != nil {
+	//                 s.log.WithError(err).Warn("Skip check failed, continuing with queue")
+	//             } else if result.ShouldSkip {
+	//                 s.log.WithFields(logrus.Fields{
+	//                     "reason":  result.Reason,
+	//                     "details": result.Details,
+	//                 }).Info("File skipped")
+	//                 if s.metrics != nil {
+	//                     s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
+	//                 }
+	//                 return c.SendString("")
+	//             }
+	//         }
+	//     }
+	// }
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
@@ -401,6 +563,26 @@ func (s *Server) handleEmby(c *fiber.Ctx) error {
 		"mapped_path":   mappedPath,
 	}).Debug("Path mapping applied")
 
+	// STORY_07: Check if file should be skipped
+	if s.skipChecker != nil {
+		result, err := s.skipChecker.Check(c.Context(), mappedPath)
+		if err != nil {
+			s.log.WithError(err).Warn("Skip check failed, continuing with queue")
+		} else if result.ShouldSkip {
+			s.log.WithFields(logrus.Fields{
+				"reason":  result.Reason,
+				"details": result.Details,
+			}).Info("File skipped")
+
+			// Record skip metric
+			if s.metrics != nil {
+				s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
+			}
+
+			return c.SendString("OK")
+		}
+	}
+
 	// Create task
 	task := Task{
 		FilePath: mappedPath,
@@ -469,6 +651,26 @@ func (s *Server) handleTautulli(c *fiber.Ctx) error {
 		"mapped_path":   mappedPath,
 	}).Debug("Path mapping applied")
 
+	// STORY_07: Check if file should be skipped
+	if s.skipChecker != nil {
+		result, err := s.skipChecker.Check(c.Context(), mappedPath)
+		if err != nil {
+			s.log.WithError(err).Warn("Skip check failed, continuing with queue")
+		} else if result.ShouldSkip {
+			s.log.WithFields(logrus.Fields{
+				"reason":  result.Reason,
+				"details": result.Details,
+			}).Info("File skipped")
+
+			// Record skip metric
+			if s.metrics != nil {
+				s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
+			}
+
+			return c.SendString("OK")
+		}
+	}
+
 	// Create task
 	task := Task{
 		FilePath: mappedPath,
@@ -493,6 +695,21 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 	language := c.Query("language", "")
 	videoFile := c.Query("video_file", "")
 	output := c.Query("output", "srt")
+
+	// STORY_05: Validate format
+	validFormats := map[string]bool{
+		"srt":  true,
+		"vtt":  true,
+		"lrc":  true,
+		"txt":  true,
+		"tsv":  true,
+		"json": true,
+	}
+	if !validFormats[output] {
+		return c.Status(fiber.StatusBadRequest).JSON(fiber.Map{
+			"error": fmt.Sprintf("invalid format: %s (supported: srt, vtt, lrc, txt, tsv, json)", output),
+		})
+	}
 
 	// Apply path mapping if video_file is provided
 	if videoFile != "" {
@@ -571,14 +788,10 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 	// Trim to actual bytes read
 	audioContent = audioContent[:n]
 
-	// Create ASR task
-	// In a real implementation, this would:
-	// 1. Generate hash from audio content for deduplication
-	// 2. Check if identical task is already processing
-	// 3. Queue the task and block until completion
-	// 4. Return the transcription result
-	//
-	// For now, we just queue it as a placeholder
+	// Create buffered result channel for blocking operation
+	resultChan := make(chan *queue.TranscriptionResult, 1)
+
+	// Create ASR task with result channel
 	task := Task{
 		FilePath:          videoFile,
 		TranscriptionType: taskType,
@@ -587,21 +800,60 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 		ASROptions: map[string]string{
 			"output": output,
 		},
+		ResultChan: resultChan, // Enable blocking
 	}
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
+		close(resultChan) // Clean up channel
 		s.log.WithError(err).Error("Failed to enqueue ASR task")
 		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 			"error": "Failed to queue task",
 		})
 	}
 
-	s.log.WithField("video_file", videoFile).Info("ASR task queued")
+	s.log.WithFields(map[string]interface{}{
+		"video_file": videoFile,
+		"format":     output,
+	}).Info("ASR task queued, waiting for result")
 
-	// In real implementation, would block and return subtitle content
-	// For now, return success
-	return c.SendString("ASR task queued successfully (placeholder response)")
+	// Block until result ready or timeout
+	timeout := 30 * time.Second
+	if s.config.ASR.Timeout > 0 {
+		timeout = s.config.ASR.Timeout
+	}
+
+	select {
+	case result := <-resultChan:
+		// Handle transcription error
+		if result.Error != nil {
+			s.log.WithError(result.Error).Error("ASR transcription failed")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("transcription failed: %v", result.Error),
+			})
+		}
+
+		// TODO STORY_05: Convert segments to requested format
+		// For now, return placeholder (STORY_05 will implement format conversion)
+		s.log.WithFields(map[string]interface{}{
+			"segments": len(result.Segments),
+			"language": result.Metadata.Language,
+			"duration": result.Metadata.Duration,
+		}).Info("ASR transcription completed")
+
+		return c.SendString(fmt.Sprintf(
+			"Transcription completed: %d segments, language: %s, duration: %.2fs (format conversion TODO in STORY_05)",
+			len(result.Segments),
+			result.Metadata.Language,
+			result.Metadata.Duration,
+		))
+
+	case <-time.After(timeout):
+		s.log.WithField("timeout", timeout).Warn("ASR transcription timeout")
+		return c.Status(fiber.StatusGatewayTimeout).JSON(fiber.Map{
+			"error": fmt.Sprintf("transcription timeout after %v", timeout),
+		})
+	}
 }
 
 // Helper function to check if string contains substring
@@ -618,4 +870,30 @@ func findSubstring(s, substr string) bool {
 		}
 	}
 	return false
+}
+
+// getPlexQueueMode returns the configured Plex queue mode (STORY_03)
+func (s *Server) getPlexQueueMode() plex.QueueMode {
+	if s.config.Plex.QueueNextEpisode {
+		return plex.QueueModeNext
+	}
+	if s.config.Plex.QueueSeason {
+		return plex.QueueModeSeason
+	}
+	if s.config.Plex.QueueSeries {
+		return plex.QueueModeSeries
+	}
+	return ""
+}
+
+// getContentType returns the appropriate Content-Type header for a subtitle format (STORY_05)
+func getContentType(format string) string {
+	switch format {
+	case "vtt":
+		return "text/vtt; charset=utf-8"
+	case "json":
+		return "application/json; charset=utf-8"
+	default:
+		return "text/plain; charset=utf-8"
+	}
 }

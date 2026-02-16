@@ -1,45 +1,66 @@
 # Story 05: ASR Format Selection
 
 **Epic**: EPIC_08  
-**Status**: Not Started  
-**Effort**: 3-4 hours  
+**Status**: BLOCKED  
+**Blocker**: STORY_10 (Blocking ASR Infrastructure) must complete first  
+**Effort**: 1-2 hours (after STORY_10 complete)  
 **Priority**: MEDIUM  
-**Assignee**: Delegation Agent
+**Assignee**: TBD
+
+---
+
+## ⚠️ BLOCKED - Architectural Dependency
+
+**Status**: This story is BLOCKED pending implementation of STORY_10 (Blocking ASR Infrastructure).
+
+**Current State**: ASR endpoint validates format parameter but returns placeholder text instead of formatted subtitles because there's no mechanism to block and wait for transcription results.
+
+**Blocker**: [STORY_10: Blocking ASR Infrastructure](./STORY_10_blocking_asr_infrastructure.md)
+
+**See**: [Work Log with Gap Analysis](../../WORKLOGS/0032_2026-02-16_epic08_story05_architectural_gap_analysis.md)
 
 ---
 
 ## User Story
 
 As a Bazarr user or ASR API consumer,
-I want to select the subtitle output format (SRT, VTT, LRC),
+I want to select the subtitle output format (SRT, VTT, LRC, TXT, TSV, JSON),
 So that I can receive subtitles in the format my player or application requires.
 
 ---
 
 ## Background
 
-The current ASR endpoint (`/asr`) returns subtitles in SRT format only. Some applications (Bazarr, web players) may prefer VTT (WebVTT) format for better web compatibility or LRC for audio-only content.
+The current ASR endpoint (`/asr`) queues transcription tasks but returns a placeholder message instead of actual subtitles. This story adds format selection and subtitle return functionality once the blocking ASR infrastructure (STORY_10) is complete.
 
-This story extends the ASR endpoint to support format selection via query parameter while maintaining backward compatibility (default: SRT).
+**Architectural Context**: The Go orchestrator uses an async queue+worker architecture. To return formatted subtitles, the endpoint must block and wait for worker completion, which requires result channels (implemented in STORY_10).
 
 ---
 
 ## Acceptance Criteria
 
-- [ ] Query parameter: `?output=srt` (default), `?output=vtt`, `?output=lrc`
-- [ ] Return subtitle in requested format
-- [ ] Still block until transcription completes
-- [ ] Content-Type headers match format:
+**Prerequisites** (must complete first):
+- [ ] STORY_10 (Blocking ASR Infrastructure) is complete
+- [ ] ASR endpoint can block and retrieve transcription results
+
+**This Story**:
+- [ ] Query parameter: `?output=srt` (default), `?output=vtt`, `?output=lrc`, `?output=txt`, `?output=tsv`, `?output=json`
+- [ ] Format validation returns 400 for invalid formats
+- [ ] Use format writers to convert segments to requested format
+- [ ] Return formatted subtitles instead of placeholder text
+- [ ] Content-Type headers set correctly:
   - SRT: `text/plain; charset=utf-8`
   - VTT: `text/vtt; charset=utf-8`
   - LRC: `text/plain; charset=utf-8`
-- [ ] Works with existing ASR deduplication (by audio hash)
-- [ ] Uses format writers from STORY_01
-- [ ] Comprehensive error handling (invalid format)
-- [ ] Unit tests for format parameter
-- [ ] Integration tests with all three formats
+  - JSON: `application/json; charset=utf-8`
+  - TXT: `text/plain; charset=utf-8`
+  - TSV: `text/tab-separated-values; charset=utf-8`
+- [ ] Works with blocking mechanism from STORY_10
+- [ ] Comprehensive error handling (invalid format, format conversion errors)
+- [ ] Unit tests updated to verify actual output format
+- [ ] Integration tests with all six formats
 - [ ] Type checking passes
-- [ ] Work log created
+- [ ] Work log updated
 
 ---
 
@@ -112,10 +133,17 @@ Content-Type: application/json
 
 ### Approach
 
-1. **Parse Format Parameter** - Extract and validate `output` query param
-2. **Call Format Writer** - Use appropriate writer from STORY_01
-3. **Set Content-Type** - Return correct MIME type for format
-4. **Maintain Deduplication** - Format doesn't affect task hash
+**Phase 1: Prerequisites** (STORY_10)
+1. ✅ Add ResultChan to Task struct
+2. ✅ Implement blocking mechanism in handleASR
+3. ✅ Worker sends results to ResultChan
+
+**Phase 2: Format Selection** (This Story)
+1. **Retrieve Result** - Get segments from ResultChan (implemented in STORY_10)
+2. **Validate Format** - Check format parameter is valid
+3. **Convert Format** - Use format writer to convert segments
+4. **Set Content-Type** - Return correct MIME type
+5. **Return Subtitles** - Send formatted content to client
 
 ### Files to Modify
 
@@ -133,86 +161,76 @@ Content-Type: application/json
 
 ### Implementation
 
-```go
-// orchestrator/internal/webhooks/asr.go
+**File**: `orchestrator/internal/webhooks/server.go`
 
-// Add format validation
-var validASRFormats = map[string]bool{
-	"srt": true,
-	"vtt": true,
-	"lrc": true,
+```go
+func (s *Server) handleASR(c *fiber.Ctx) error {
+	// ... existing validation code (STORY_10 implements blocking) ...
+	
+	// STORY_10 will implement this section:
+	// - Create ResultChan
+	// - Queue task with ResultChan
+	// - Block with select/timeout
+	// - Receive result from channel
+	
+	// Block until result ready (implemented in STORY_10)
+	select {
+	case result := <-resultChan:
+		if result.Error != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("transcription failed: %v", result.Error),
+			})
+		}
+		
+		// --- THIS STORY STARTS HERE ---
+		// Parse output format parameter (validation already done, stored in task.ASROptions)
+		outputFormat := c.Query("output", "srt")
+		
+		// Use format writer to convert segments (THIS IS NEW)
+		var buffer bytes.Buffer
+		writer, err := formats.NewWriter(outputFormat)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("unsupported format: %s", outputFormat),
+			})
+		}
+		
+		if err := writer.Write(&buffer, result.Segments, result.Metadata); err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("format conversion failed: %v", err),
+			})
+		}
+		
+		// Set Content-Type header based on format (THIS IS NEW)
+		c.Set("Content-Type", getContentType(outputFormat))
+		
+		// Return formatted subtitles (THIS IS NEW - replaces placeholder)
+		return c.SendString(buffer.String())
+		
+	case <-time.After(timeout):
+		// ... timeout handling (implemented in STORY_10) ...
+	}
 }
 
-// Modify handleASR function
-func (s *Server) handleASR(c *fiber.Ctx) error {
-	// ... existing code for task and language ...
-	
-	// Parse output format parameter
-	outputFormat := c.Query("output", "srt")
-	outputFormat = strings.ToLower(strings.TrimSpace(outputFormat))
-	
-	// Validate format
-	if !validASRFormats[outputFormat] {
-		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
-			Status: "error",
-			Error:  fmt.Sprintf("invalid output format: %s (must be srt, vtt, or lrc)", outputFormat),
-		})
-	}
-	
-	// ... existing code for audio upload, hashing, queueing ...
-	
-	// Wait for transcription result
-	result := <-resultChan
-	if result.Error != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Status: "error",
-			Error:  result.Error.Error(),
-		})
-	}
-	
-	// Convert segments to requested format
-	var output bytes.Buffer
-	var contentType string
-	
-	switch outputFormat {
+// Helper already exists, just needs to be called (line 792-802)
+func getContentType(format string) string {
+	switch format {
 	case "vtt":
-		writer := formats.NewVTTWriter()
-		if err := writer.Write(&output, result.Segments, result.Metadata); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Status: "error",
-				Error:  fmt.Sprintf("failed to generate VTT: %v", err),
-			})
-		}
-		contentType = "text/vtt; charset=utf-8"
-		
-	case "lrc":
-		writer := formats.NewLRCWriter()
-		if err := writer.Write(&output, result.Segments, result.Metadata); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Status: "error",
-				Error:  fmt.Sprintf("failed to generate LRC: %v", err),
-			})
-		}
-		contentType = "text/plain; charset=utf-8"
-		
-	case "srt":
-		fallthrough
+		return "text/vtt; charset=utf-8"
+	case "json":
+		return "application/json; charset=utf-8"
 	default:
-		writer := formats.NewSRTWriter()
-		if err := writer.Write(&output, result.Segments, result.Metadata); err != nil {
-			return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-				Status: "error",
-				Error:  fmt.Sprintf("failed to generate SRT: %v", err),
-			})
-		}
-		contentType = "text/plain; charset=utf-8"
+		return "text/plain; charset=utf-8"
 	}
-	
-	// Set Content-Type and return
-	c.Set("Content-Type", contentType)
-	return c.SendString(output.String())
 }
 ```
+
+**Changes from Current Code**:
+1. Replace placeholder return with format conversion (lines 4-6 added)
+2. Call `formats.NewWriter()` to get format writer (line 5 new)
+3. Convert segments using writer (line 6 new)
+4. Set Content-Type header (line 7 new)
+5. Return formatted content (line 8 new)
 
 ### Content-Type Headers
 
@@ -353,12 +371,18 @@ curl -X POST "http://localhost:9000/asr?task=transcribe&language=en&output=vtt" 
 
 ## Dependencies
 
+**BLOCKED BY:**
+- ⚠️ STORY_10 (Blocking ASR Infrastructure) - MUST complete first
+  - Adds ResultChan to Task struct
+  - Implements blocking mechanism in handleASR
+  - Worker result routing to ResultChan
+
 **Requires:**
-- STORY_01 (Multiple Output Formats) - ✅ Must be complete (format writers needed)
+- ✅ STORY_01 (Multiple Output Formats) - Complete (format writers ready)
 
 **Integration:**
-- ASR endpoint (existing)
-- Format writers package
+- ASR endpoint (STORY_10 adds blocking)
+- Format writers package (STORY_01)
 
 ---
 

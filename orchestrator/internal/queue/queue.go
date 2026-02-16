@@ -27,6 +27,9 @@ type Queue struct {
 	queued     map[string]*Task // Tasks waiting in queue
 	processing map[string]*Task // Tasks currently being processed
 
+	// Task history for completed/failed tasks
+	history *TaskHistory
+
 	// Configuration
 	maxSize int
 
@@ -46,6 +49,7 @@ func NewQueue(maxSize int, metrics *QueueMetrics, log *logrus.Logger) *Queue {
 		heap:       h,
 		queued:     make(map[string]*Task),
 		processing: make(map[string]*Task),
+		history:    NewTaskHistory(100), // Keep last 100 completed/failed tasks
 		maxSize:    maxSize,
 		metrics:    metrics,
 		log:        log,
@@ -149,6 +153,10 @@ func (q *Queue) MarkDone(taskID string) error {
 	task.CompletedAt = time.Now()
 	delete(q.processing, taskID)
 
+	// Add to history
+	taskInfo := q.taskToTaskInfo(task, TaskStatusCompleted, "")
+	q.history.Add(taskInfo)
+
 	// Update metrics
 	q.metrics.ProcessingSize.Set(float64(len(q.processing)))
 	q.metrics.TasksCompleted.WithLabelValues(string(task.Type)).Inc()
@@ -175,7 +183,12 @@ func (q *Queue) MarkFailed(taskID string, err error) error {
 		return ErrTaskNotFound
 	}
 
+	task.CompletedAt = time.Now()
 	delete(q.processing, taskID)
+
+	// Add to history with error
+	taskInfo := q.taskToTaskInfo(task, TaskStatusFailed, err.Error())
+	q.history.Add(taskInfo)
 
 	// Update metrics
 	q.metrics.ProcessingSize.Set(float64(len(q.processing)))
@@ -305,4 +318,75 @@ func (h *taskHeap) Pop() interface{} {
 	task := old[n-1]
 	*h = old[0 : n-1]
 	return task
+}
+
+// GetTaskInfo retrieves detailed information about a task (queued, processing, or from history)
+func (q *Queue) GetTaskInfo(taskID string) *TaskInfo {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	// Check if task is queued
+	if task, exists := q.queued[taskID]; exists {
+		info := q.taskToTaskInfo(task, TaskStatusQueued, "")
+		return &info
+	}
+
+	// Check if task is processing
+	if task, exists := q.processing[taskID]; exists {
+		info := q.taskToTaskInfo(task, TaskStatusProcessing, "")
+		return &info
+	}
+
+	// Check history
+	return q.history.Get(taskID)
+}
+
+// GetAllProcessingTaskInfo returns detailed information about all currently processing tasks
+func (q *Queue) GetAllProcessingTaskInfo() []TaskInfo {
+	q.mu.RLock()
+	defer q.mu.RUnlock()
+
+	result := make([]TaskInfo, 0, len(q.processing))
+	for _, task := range q.processing {
+		info := q.taskToTaskInfo(task, TaskStatusProcessing, "")
+		result = append(result, info)
+	}
+	return result
+}
+
+// GetHistory returns task history with pagination
+func (q *Queue) GetHistory(limit, offset int) []TaskInfo {
+	// TaskHistory is already thread-safe
+	return q.history.List(limit, offset)
+}
+
+// GetHistoryTotal returns total number of tasks in history
+func (q *Queue) GetHistoryTotal() int {
+	return q.history.Total()
+}
+
+// taskToTaskInfo converts a Task to TaskInfo with given status
+// This is a helper method that must be called with lock held
+func (q *Queue) taskToTaskInfo(task *Task, status TaskStatus, errorMsg string) TaskInfo {
+	info := TaskInfo{
+		ID:       task.ID,
+		FilePath: task.FilePath,
+		Status:   status,
+		Priority: int(task.Priority),
+		QueuedAt: task.QueuedAt,
+		Error:    errorMsg,
+	}
+
+	if !task.StartedAt.IsZero() {
+		info.StartedAt = &task.StartedAt
+	}
+
+	if !task.CompletedAt.IsZero() {
+		info.CompletedAt = &task.CompletedAt
+		info.Duration = task.CompletedAt.Sub(task.StartedAt)
+	}
+
+	// TODO: Add OutputFile, Progress, ETASeconds, WorkerID when available
+	
+	return info
 }

@@ -48,6 +48,44 @@ func (a *QueueAdapter) Enqueue(task Task) error {
 	queueTask.AudioContent = task.AudioContent
 	queueTask.ASROptions = task.ASROptions
 
+	// Set result channel for blocking operations (STORY_10)
+	queueTask.ResultChan = task.ResultChan
+
 	// Enqueue the task
 	return a.queue.Enqueue(queueTask)
+}
+
+// Size returns the number of queued tasks
+func (a *QueueAdapter) Size() int {
+	return a.queue.Size()
+}
+
+// ProcessingCount returns the number of tasks currently processing
+func (a *QueueAdapter) ProcessingCount() int {
+	return a.queue.ProcessingCount()
+}
+
+// IsIdle returns true if queue is empty and nothing is processing
+func (a *QueueAdapter) IsIdle() bool {
+	return a.queue.IsIdle()
+}
+
+// GetTaskInfo retrieves detailed information about a task
+func (a *QueueAdapter) GetTaskInfo(taskID string) *queue.TaskInfo {
+	return a.queue.GetTaskInfo(taskID)
+}
+
+// GetAllProcessingTaskInfo returns all currently processing tasks
+func (a *QueueAdapter) GetAllProcessingTaskInfo() []queue.TaskInfo {
+	return a.queue.GetAllProcessingTaskInfo()
+}
+
+// GetHistory returns task history with pagination
+func (a *QueueAdapter) GetHistory(limit, offset int) []queue.TaskInfo {
+	return a.queue.GetHistory(limit, offset)
+}
+
+// GetHistoryTotal returns total number of tasks in history
+func (a *QueueAdapter) GetHistoryTotal() int {
+	return a.queue.GetHistoryTotal()
 }

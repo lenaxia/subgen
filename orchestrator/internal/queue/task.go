@@ -24,6 +24,27 @@ const (
 	PriorityTranscribe     Priority = 2 // Lowest priority
 )
 
+// Segment represents a single subtitle segment
+type Segment struct {
+	Start float64 // Start time in seconds
+	End   float64 // End time in seconds
+	Text  string  // Subtitle text
+}
+
+// Metadata holds transcription metadata
+type Metadata struct {
+	Language string  // Detected language code (e.g., "en")
+	Duration float64 // Audio duration in seconds
+	Model    string  // Whisper model used (e.g., "medium")
+}
+
+// TranscriptionResult holds the result of a completed transcription
+type TranscriptionResult struct {
+	Segments []Segment // Transcription segments
+	Metadata Metadata  // Language, duration, model
+	Error    error     // Error if transcription failed
+}
+
 // Task represents a transcription task
 type Task struct {
 	// Identification
@@ -47,6 +68,11 @@ type Task struct {
 	// ASR-specific fields
 	AudioContent []byte            // For ASR tasks (Bazarr upload)
 	ASROptions   map[string]string // ASR query parameters
+
+	// Blocking operations (ASR, detect language)
+	// When set, worker sends result to this channel instead of writing file
+	// Channel is buffered (size 1) to prevent worker blocking
+	ResultChan chan *TranscriptionResult
 
 	// Timing
 	QueuedAt    time.Time // When task was enqueued

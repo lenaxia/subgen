@@ -14,6 +14,7 @@ type BasicChecker struct {
 	detector        *SubtitleDetector
 	externalScanner *ExternalScanner
 	audioDetector   *AudioDetector
+	advancedChecker *AdvancedChecker
 }
 
 // NewBasicChecker creates a new BasicChecker with the given configuration
@@ -26,11 +27,17 @@ func NewBasicChecker(config *Config) (*BasicChecker, error) {
 		return nil, fmt.Errorf("invalid config: %w", err)
 	}
 
+	advancedChecker, err := NewAdvancedChecker(config)
+	if err != nil {
+		return nil, fmt.Errorf("failed to create advanced checker: %w", err)
+	}
+
 	return &BasicChecker{
 		config:          config,
 		detector:        NewSubtitleDetector(),
 		externalScanner: NewExternalScanner(),
 		audioDetector:   NewAudioDetector(),
+		advancedChecker: advancedChecker,
 	}, nil
 }
 
@@ -194,6 +201,49 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 				}
 			}
 		}
+	}
+
+	// STORY_06: Check unknown language (if enabled)
+	// Note: This requires language detection context that would typically be passed in
+	// For now, we check if config is enabled. Real implementation would need detected language.
+	// This is a placeholder for integration with language detection flow.
+	targetLanguage := c.config.SkipIfInternalSubtitlesLanguage
+	if shouldSkip, details := c.advancedChecker.CheckUnknownLanguage(targetLanguage); shouldSkip {
+		return &CheckResult{ShouldSkip: true, Reason: ReasonUnknownLanguage, Details: details}, nil
+	}
+
+	// STORY_06: Check no language but subtitles exist
+	// This check is used after language detection in the actual workflow
+	// Determine if subtitles exist based on previous checks
+	hasSubtitles := false
+
+	// Check if basic subtitle files exist
+	if exists(srtPath) {
+		hasSubtitles = true
+	}
+	if isAudioFile(filePath) {
+		lrcPath := getSubtitlePath(filePath, ".lrc")
+		if exists(lrcPath) {
+			hasSubtitles = true
+		}
+	}
+
+	// Check for embedded subtitles (if enabled)
+	if c.config.CheckEmbeddedSubtitles && isVideoFile(filePath) {
+		tracks, err := c.detector.GetEmbeddedSubtitles(ctx, filePath)
+		if err == nil && len(tracks) > 0 {
+			hasSubtitles = true
+		}
+	}
+
+	// Check for external subtitles
+	externalSubs, err := c.externalScanner.ScanForSubtitles(filePath)
+	if err == nil && len(externalSubs) > 0 {
+		hasSubtitles = true
+	}
+
+	if shouldSkip, details := c.advancedChecker.CheckNoLanguageButSubtitlesExist(targetLanguage, hasSubtitles); shouldSkip {
+		return &CheckResult{ShouldSkip: true, Reason: ReasonNoLanguageButSubtitlesExist, Details: details}, nil
 	}
 
 	return &CheckResult{

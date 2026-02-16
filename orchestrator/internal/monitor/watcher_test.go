@@ -292,11 +292,17 @@ func TestFileWatcher_Watch_WriteEventIgnored(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Create file (should trigger callback)
-	testFile := filepath.Join(testDir, "test.txt")
+	testFile := filepath.Join(testDir, "test.mkv")
 	err = os.WriteFile(testFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
+
+	// Verify CREATE callback was triggered
+	callbackMu.Lock()
+	initialCount := callbackCount
+	callbackMu.Unlock()
+	assert.Equal(t, 1, initialCount, "Expected CREATE event to trigger callback")
 
 	// Modify file (WRITE event - should NOT trigger callback)
 	err = os.WriteFile(testFile, []byte("modified content"), 0644)
@@ -304,9 +310,9 @@ func TestFileWatcher_Watch_WriteEventIgnored(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Should only have 1 callback (CREATE), not 2 (CREATE + WRITE)
+	// Should still have only 1 callback (CREATE only, not WRITE)
 	callbackMu.Lock()
-	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback")
+	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback, not WRITE")
 	callbackMu.Unlock()
 
 	cancel()
@@ -341,11 +347,17 @@ func TestFileWatcher_Watch_ChmodEventIgnored(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Create file (should trigger callback)
-	testFile := filepath.Join(testDir, "test.txt")
+	testFile := filepath.Join(testDir, "test.mkv")
 	err = os.WriteFile(testFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
+
+	// Verify CREATE callback was triggered
+	callbackMu.Lock()
+	initialCount := callbackCount
+	callbackMu.Unlock()
+	assert.Equal(t, 1, initialCount, "Expected CREATE event to trigger callback")
 
 	// Change permissions (CHMOD event - should NOT trigger callback)
 	err = os.Chmod(testFile, 0755)
@@ -353,9 +365,9 @@ func TestFileWatcher_Watch_ChmodEventIgnored(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Should only have 1 callback (CREATE), not 2
+	// Should still have only 1 callback (CREATE only, not CHMOD)
 	callbackMu.Lock()
-	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback")
+	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback, not CHMOD")
 	callbackMu.Unlock()
 
 	cancel()
@@ -390,11 +402,17 @@ func TestFileWatcher_Watch_RemoveEventIgnored(t *testing.T) {
 	time.Sleep(100 * time.Millisecond)
 
 	// Create file (should trigger callback)
-	testFile := filepath.Join(testDir, "test.txt")
+	testFile := filepath.Join(testDir, "test.mkv")
 	err = os.WriteFile(testFile, []byte("test content"), 0644)
 	require.NoError(t, err)
 
 	time.Sleep(100 * time.Millisecond)
+
+	// Verify CREATE callback was triggered
+	callbackMu.Lock()
+	initialCount := callbackCount
+	callbackMu.Unlock()
+	assert.Equal(t, 1, initialCount, "Expected CREATE event to trigger callback")
 
 	// Remove file (REMOVE event - should NOT trigger callback)
 	err = os.Remove(testFile)
@@ -402,9 +420,9 @@ func TestFileWatcher_Watch_RemoveEventIgnored(t *testing.T) {
 
 	time.Sleep(100 * time.Millisecond)
 
-	// Should only have 1 callback (CREATE), not 2
+	// Should still have only 1 callback (CREATE only, not REMOVE)
 	callbackMu.Lock()
-	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback")
+	assert.Equal(t, 1, callbackCount, "Expected only CREATE event to trigger callback, not REMOVE")
 	callbackMu.Unlock()
 
 	cancel()

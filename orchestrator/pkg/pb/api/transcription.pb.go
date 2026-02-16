@@ -4,7 +4,7 @@
 // 	protoc        v4.25.1
 // source: api/transcription.proto
 
-package pb
+package v1
 
 import (
 	protoreflect "google.golang.org/protobuf/reflect/protoreflect"
@@ -878,7 +878,7 @@ const file_api_transcription_proto_rawDesc = "" +
 	"\n" +
 	"Transcribe\x12\x1c.subgen.v1.TranscribeRequest\x1a\x1d.subgen.v1.TranscribeResponse\x12U\n" +
 	"\x0eDetectLanguage\x12 .subgen.v1.DetectLanguageRequest\x1a!.subgen.v1.DetectLanguageResponse\x12L\n" +
-	"\vHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB/Z-github.com/mccloud/subgen/orchestrator/pkg/pbb\x06proto3"
+	"\vHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB4Z2github.com/your-org/subgen/orchestrator/pkg/api/v1b\x06proto3"
 
 var (
 	file_api_transcription_proto_rawDescOnce sync.Once

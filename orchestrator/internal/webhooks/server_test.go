@@ -10,6 +10,7 @@ import (
 
 	"github.com/gofiber/fiber/v2"
 	"github.com/mccloud/subgen/orchestrator/internal/config"
+	"github.com/mccloud/subgen/orchestrator/internal/queue"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -27,6 +28,34 @@ func (m *MockQueue) Enqueue(task Task) error {
 	}
 	m.tasks = append(m.tasks, task)
 	return nil
+}
+
+func (m *MockQueue) Size() int {
+	return len(m.tasks)
+}
+
+func (m *MockQueue) ProcessingCount() int {
+	return 0
+}
+
+func (m *MockQueue) IsIdle() bool {
+	return len(m.tasks) == 0
+}
+
+func (m *MockQueue) GetTaskInfo(taskID string) *queue.TaskInfo {
+	return nil
+}
+
+func (m *MockQueue) GetAllProcessingTaskInfo() []queue.TaskInfo {
+	return []queue.TaskInfo{}
+}
+
+func (m *MockQueue) GetHistory(limit, offset int) []queue.TaskInfo {
+	return []queue.TaskInfo{}
+}
+
+func (m *MockQueue) GetHistoryTotal() int {
+	return 0
 }
 
 func (m *MockQueue) GetTasks() []Task {

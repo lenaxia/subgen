@@ -2,7 +2,7 @@ syntax = "proto3";
 
 package subgen.v1;
 
-option go_package = "github.com/your-org/subgen/orchestrator/pkg/api/v1";
+option go_package = "github.com/mccloud/subgen/orchestrator/pkg/pb";
 
 // ============================================================================
 // Transcription Service
@@ -70,6 +70,21 @@ message TranscribeOptions {
   
   // Show "subgen" in subtitle filename
   bool show_subgen_in_filename = 10;
+  
+  // Advanced Whisper options (STORY_08)
+  // Use custom prompt flag
+  bool use_prompt = 11;
+  
+  // Extra Whisper kwargs as JSON-encoded strings
+  // Keys: temperature, beam_size, compression_ratio_threshold, etc.
+  // Values: JSON-encoded values (e.g., "0.5", "5", "true")
+  map<string, string> extra_kwargs = 12;
+  
+  // Device: cpu, cuda, or gpu
+  string device = 13;
+  
+  // Compute type: auto, int8, int8_float16, float16, float32
+  string compute_type = 14;
 }
 
 message TranscribeResponse {

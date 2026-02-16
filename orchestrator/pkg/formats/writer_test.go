@@ -24,8 +24,12 @@ func TestNewWriter_ValidFormats(t *testing.T) {
 		format   string
 		expected string // Expected type name
 	}{
+		{"srt", "*formats.SRTWriter"},
+		{"SRT", "*formats.SRTWriter"},
 		{"vtt", "*formats.VTTWriter"},
 		{"VTT", "*formats.VTTWriter"},
+		{"lrc", "*formats.LRCWriter"},
+		{"LRC", "*formats.LRCWriter"},
 		{"txt", "*formats.TXTWriter"},
 		{"TXT", "*formats.TXTWriter"},
 		{"tsv", "*formats.TSVWriter"},
@@ -54,10 +58,9 @@ func TestNewWriter_InvalidFormat(t *testing.T) {
 	tests := []string{
 		"",
 		"unknown",
-		"srt", // Not implemented yet
-		"lrc", // Not implemented yet
 		"invalid",
 		"123",
+		"pdf",
 	}
 
 	for _, format := range tests {
@@ -95,7 +98,7 @@ func TestNewWriter_CaseInsensitive(t *testing.T) {
 
 // TestAllFormats_Integration tests that all formats can be created and write successfully
 func TestAllFormats_Integration(t *testing.T) {
-	formats := []string{"vtt", "txt", "tsv", "json"}
+	formats := []string{"srt", "vtt", "lrc", "txt", "tsv", "json"}
 
 	for _, format := range formats {
 		t.Run(format, func(t *testing.T) {
@@ -125,7 +128,7 @@ func TestAllFormats_Integration(t *testing.T) {
 
 // TestEmptySegments tests that all formats handle empty segment lists gracefully
 func TestEmptySegments(t *testing.T) {
-	formats := []string{"vtt", "txt", "tsv", "json"}
+	formats := []string{"srt", "vtt", "lrc", "txt", "tsv", "json"}
 
 	for _, format := range formats {
 		t.Run(format, func(t *testing.T) {
@@ -145,8 +148,8 @@ func TestEmptySegments(t *testing.T) {
 
 			// Output should still be valid (e.g., JSON should be valid, VTT should have header)
 			output := buf.String()
-			if output == "" && (format == "vtt" || format == "json" || format == "tsv") {
-				// VTT needs header, JSON needs structure, TSV needs header
+			if output == "" && (format == "vtt" || format == "json" || format == "tsv" || format == "lrc") {
+				// VTT needs header, JSON needs structure, TSV needs header, LRC needs metadata
 				t.Errorf("%s writer should produce some output even with empty segments", format)
 			}
 		})

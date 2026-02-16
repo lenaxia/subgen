@@ -26,15 +26,19 @@ type Writer interface {
 }
 
 // NewWriter creates a new Writer instance for the specified format
-// Supported formats: vtt, txt, tsv, json (case-insensitive)
+// Supported formats: srt, vtt, lrc, txt, tsv, json (case-insensitive)
 // Returns error if format is not supported
 func NewWriter(format string) (Writer, error) {
 	// Normalize format to lowercase for case-insensitive comparison
 	normalized := strings.ToLower(strings.TrimSpace(format))
 
 	switch normalized {
+	case "srt":
+		return &SRTWriter{}, nil
 	case "vtt":
 		return &VTTWriter{}, nil
+	case "lrc":
+		return &LRCWriter{}, nil
 	case "txt":
 		return &TXTWriter{}, nil
 	case "tsv":
@@ -42,6 +46,6 @@ func NewWriter(format string) (Writer, error) {
 	case "json":
 		return &JSONWriter{}, nil
 	default:
-		return nil, fmt.Errorf("unsupported format: %s (supported: vtt, txt, tsv, json)", format)
+		return nil, fmt.Errorf("unsupported format: %s (supported: srt, vtt, lrc, txt, tsv, json)", format)
 	}
 }

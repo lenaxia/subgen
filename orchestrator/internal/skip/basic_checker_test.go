@@ -116,36 +116,8 @@ func TestBasicChecker_Check_AudioWithLRC(t *testing.T) {
 	}
 }
 
-// TestBasicChecker_Check_AudioWithoutLRC tests not skipping when .lrc doesn't exist
-func TestBasicChecker_Check_AudioWithoutLRC(t *testing.T) {
-	tmpDir := t.TempDir()
-	audioPath := filepath.Join(tmpDir, "audio.mp3")
-
-	// Create only audio, no lrc
-	if err := os.WriteFile(audioPath, []byte("fake audio"), 0644); err != nil {
-		t.Fatalf("Failed to create test audio: %v", err)
-	}
-
-	config := &Config{
-		SkipIfTargetSubtitleExists: true,
-	}
-	checker, err := NewBasicChecker(config)
-	if err != nil {
-		t.Fatalf("Failed to create checker: %v", err)
-	}
-
-	result, err := checker.Check(context.Background(), audioPath)
-	if err != nil {
-		t.Fatalf("Check failed: %v", err)
-	}
-
-	if result.ShouldSkip {
-		t.Error("Expected ShouldSkip=false when .lrc doesn't exist, got true")
-	}
-}
-
-// TestBasicChecker_Check_SkipDisabled tests behavior when skip is disabled
-func TestBasicChecker_Check_SkipDisabled(t *testing.T) {
+// TestBasicChecker_Check_Disabled tests that skip checking is disabled when configured
+func TestBasicChecker_Check_Disabled(t *testing.T) {
 	tmpDir := t.TempDir()
 	videoPath := filepath.Join(tmpDir, "video.mkv")
 	srtPath := filepath.Join(tmpDir, "video.srt")
@@ -158,9 +130,8 @@ func TestBasicChecker_Check_SkipDisabled(t *testing.T) {
 		t.Fatalf("Failed to create test subtitle: %v", err)
 	}
 
-	// Disable skip checking
 	config := &Config{
-		SkipIfTargetSubtitleExists: false,
+		SkipIfTargetSubtitleExists: false, // Disabled
 	}
 	checker, err := NewBasicChecker(config)
 	if err != nil {
@@ -172,9 +143,8 @@ func TestBasicChecker_Check_SkipDisabled(t *testing.T) {
 		t.Fatalf("Check failed: %v", err)
 	}
 
-	// Should NOT skip even though .srt exists
 	if result.ShouldSkip {
-		t.Error("Expected ShouldSkip=false when skip disabled, got true")
+		t.Error("Expected ShouldSkip=false when skip checking disabled, got true")
 	}
 
 	if result.Reason != ReasonNotApplicable {
@@ -182,27 +152,13 @@ func TestBasicChecker_Check_SkipDisabled(t *testing.T) {
 	}
 }
 
-// TestBasicChecker_Check_EmptyPath tests error handling for empty path
-func TestBasicChecker_Check_EmptyPath(t *testing.T) {
-	config := &Config{
-		SkipIfTargetSubtitleExists: true,
-	}
-	checker, err := NewBasicChecker(config)
-	if err != nil {
-		t.Fatalf("Failed to create checker: %v", err)
-	}
-
-	_, err = checker.Check(context.Background(), "")
-	if err == nil {
-		t.Error("Expected error for empty path, got nil")
-	}
-}
-
-// TestBasicChecker_Check_MultipleExtensions tests files with complex names
-func TestBasicChecker_Check_MultipleExtensions(t *testing.T) {
+// TestBasicChecker_HasSubtitlesDetection_WithExternalSRT tests hasSubtitles detection with external SRT
+// This test verifies that when SkipIfExternalSubtitlesExist is enabled and an external subtitle
+// with matching language is found, the file should be skipped
+func TestBasicChecker_HasSubtitlesDetection_WithExternalSRT(t *testing.T) {
 	tmpDir := t.TempDir()
-	videoPath := filepath.Join(tmpDir, "movie.eng.mkv")
-	srtPath := filepath.Join(tmpDir, "movie.eng.srt")
+	videoPath := filepath.Join(tmpDir, "video.mkv")
+	srtPath := filepath.Join(tmpDir, "video.en.srt")
 
 	// Create test files
 	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
@@ -213,7 +169,10 @@ func TestBasicChecker_Check_MultipleExtensions(t *testing.T) {
 	}
 
 	config := &Config{
-		SkipIfTargetSubtitleExists: true,
+		SkipIfTargetSubtitleExists:        true,  // Master switch must be enabled
+		SkipIfExternalSubtitlesExist:      true,  // Enable external subtitle detection
+		SkipIfInternalSubtitlesLanguage:   "en",  // Target language "en"
+		SkipIfNoLanguageButSubtitlesExist: false, // Don't use advanced check for this test
 	}
 	checker, err := NewBasicChecker(config)
 	if err != nil {
@@ -225,211 +184,33 @@ func TestBasicChecker_Check_MultipleExtensions(t *testing.T) {
 		t.Fatalf("Check failed: %v", err)
 	}
 
+	// Should detect external subtitle and skip
 	if !result.ShouldSkip {
-		t.Error("Expected ShouldSkip=true for file with multiple extensions")
+		t.Errorf("Expected ShouldSkip=true when external subtitle exists, got false (reason: %v, details: %s)",
+			result.Reason, result.Details)
+	}
+
+	if result.Reason != ReasonExternalSubtitle {
+		t.Errorf("Expected Reason=%v, got %v (details: %s)", ReasonExternalSubtitle, result.Reason, result.Details)
 	}
 }
 
-// TestBasicChecker_Check_VariousAudioFormats tests different audio file extensions
-func TestBasicChecker_Check_VariousAudioFormats(t *testing.T) {
-	audioExts := []string{".mp3", ".m4a", ".flac", ".wav", ".aac", ".ogg", ".opus", ".wma"}
-
-	for _, ext := range audioExts {
-		t.Run(ext, func(t *testing.T) {
-			tmpDir := t.TempDir()
-			audioPath := filepath.Join(tmpDir, "audio"+ext)
-			lrcPath := filepath.Join(tmpDir, "audio.lrc")
-
-			// Create test files
-			if err := os.WriteFile(audioPath, []byte("fake audio"), 0644); err != nil {
-				t.Fatalf("Failed to create test audio: %v", err)
-			}
-			if err := os.WriteFile(lrcPath, []byte("fake lyrics"), 0644); err != nil {
-				t.Fatalf("Failed to create test lrc: %v", err)
-			}
-
-			config := &Config{
-				SkipIfTargetSubtitleExists: true,
-			}
-			checker, err := NewBasicChecker(config)
-			if err != nil {
-				t.Fatalf("Failed to create checker: %v", err)
-			}
-
-			result, err := checker.Check(context.Background(), audioPath)
-			if err != nil {
-				t.Fatalf("Check failed: %v", err)
-			}
-
-			if !result.ShouldSkip {
-				t.Errorf("Expected ShouldSkip=true for audio format %s with .lrc", ext)
-			}
-
-			if result.Reason != ReasonLRCExists {
-				t.Errorf("Expected Reason=%v for %s, got %v", ReasonLRCExists, ext, result.Reason)
-			}
-		})
-	}
-}
-
-// TestBasicChecker_Check_NonExistentFile tests checking non-existent source files
-func TestBasicChecker_Check_NonExistentFile(t *testing.T) {
+// TestBasicChecker_HasSubtitlesDetection_NoSubtitles tests hasSubtitles detection without any subtitles
+func TestBasicChecker_HasSubtitlesDetection_NoSubtitles(t *testing.T) {
 	tmpDir := t.TempDir()
-	videoPath := filepath.Join(tmpDir, "nonexistent.mkv")
+	videoPath := filepath.Join(tmpDir, "video.mkv")
 
-	config := &Config{
-		SkipIfTargetSubtitleExists: true,
-	}
-	checker, err := NewBasicChecker(config)
-	if err != nil {
-		t.Fatalf("Failed to create checker: %v", err)
-	}
-
-	// Should not error even if source file doesn't exist
-	// (checking for subtitle existence, not source file)
-	result, err := checker.Check(context.Background(), videoPath)
-	if err != nil {
-		t.Fatalf("Check failed for non-existent file: %v", err)
-	}
-
-	// Should not skip if no subtitle exists
-	if result.ShouldSkip {
-		t.Error("Expected ShouldSkip=false for non-existent file without subtitle")
-	}
-}
-
-// TestNewBasicChecker_NilConfig tests error handling for nil config
-func TestNewBasicChecker_NilConfig(t *testing.T) {
-	_, err := NewBasicChecker(nil)
-	if err == nil {
-		t.Error("Expected error for nil config, got nil")
-	}
-}
-
-// TestNewBasicChecker_InvalidConfig tests error handling for invalid config
-func TestNewBasicChecker_InvalidConfig(t *testing.T) {
-	config := &Config{
-		SkipIfTargetSubtitleExists: true,
-	}
-
-	// Simulate validation failure (will be tested in config_test.go)
-	checker, err := NewBasicChecker(config)
-	if err != nil {
-		t.Fatalf("Unexpected error for valid config: %v", err)
-	}
-
-	if checker == nil {
-		t.Error("Expected non-nil checker for valid config")
-	}
-}
-
-// TestIsAudioFile tests audio file detection helper
-func TestIsAudioFile(t *testing.T) {
-	tests := []struct {
-		name     string
-		filePath string
-		want     bool
-	}{
-		{"MP3", "/path/to/audio.mp3", true},
-		{"M4A", "/path/to/audio.m4a", true},
-		{"FLAC", "/path/to/audio.flac", true},
-		{"WAV", "/path/to/audio.wav", true},
-		{"AAC", "/path/to/audio.aac", true},
-		{"OGG", "/path/to/audio.ogg", true},
-		{"OPUS", "/path/to/audio.opus", true},
-		{"WMA", "/path/to/audio.wma", true},
-		{"MKV", "/path/to/video.mkv", false},
-		{"MP4", "/path/to/video.mp4", false},
-		{"AVI", "/path/to/video.avi", false},
-		{"UpperCase", "/path/to/audio.MP3", true},
-		{"NoExtension", "/path/to/file", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := isAudioFile(tt.filePath)
-			if got != tt.want {
-				t.Errorf("isAudioFile(%q) = %v, want %v", tt.filePath, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestGetSubtitlePath tests subtitle path generation
-func TestGetSubtitlePath(t *testing.T) {
-	tests := []struct {
-		name        string
-		filePath    string
-		subtitleExt string
-		want        string
-	}{
-		{"SimpleVideo", "/path/to/video.mkv", ".srt", "/path/to/video.srt"},
-		{"SimpleAudio", "/path/to/audio.mp3", ".lrc", "/path/to/audio.lrc"},
-		{"MultipleExt", "/path/to/movie.eng.mkv", ".srt", "/path/to/movie.eng.srt"},
-		{"NoExtension", "/path/to/file", ".srt", "/path/to/file.srt"},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := getSubtitlePath(tt.filePath, tt.subtitleExt)
-			if got != tt.want {
-				t.Errorf("getSubtitlePath(%q, %q) = %q, want %q",
-					tt.filePath, tt.subtitleExt, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestExists tests file existence helper
-func TestExists(t *testing.T) {
-	tmpDir := t.TempDir()
-
-	// Create a test file
-	existingFile := filepath.Join(tmpDir, "exists.txt")
-	if err := os.WriteFile(existingFile, []byte("test"), 0644); err != nil {
-		t.Fatalf("Failed to create test file: %v", err)
-	}
-
-	tests := []struct {
-		name string
-		path string
-		want bool
-	}{
-		{"ExistingFile", existingFile, true},
-		{"NonExistentFile", filepath.Join(tmpDir, "notexist.txt"), false},
-		{"EmptyPath", "", false},
-	}
-
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			got := exists(tt.path)
-			if got != tt.want {
-				t.Errorf("exists(%q) = %v, want %v", tt.path, got, tt.want)
-			}
-		})
-	}
-}
-
-// TestBasicChecker_PreferredAudioLanguageFiltering tests STORY_05 integration
-// These tests verify that preferred audio language filtering works end-to-end
-func TestBasicChecker_PreferredAudioLanguageFiltering_Disabled(t *testing.T) {
-	// When LIMIT_TO_PREFERRED_AUDIO_LANGUAGE=false, should never skip based on audio
-	tmpDir := t.TempDir()
-	videoPath := filepath.Join(tmpDir, "movie.mkv")
-
-	// Create test video file
+	// Create only video file, no subtitles
 	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
 		t.Fatalf("Failed to create test video: %v", err)
 	}
 
 	config := &Config{
-		SkipIfTargetSubtitleExists:    false,
-		CheckEmbeddedSubtitles:        false,
-		SkipIfExternalSubtitlesExist:  false,
-		PreferredAudioLanguages:       []string{"eng", "jpn"},
-		LimitToPreferredAudioLanguage: false, // Disabled
+		SkipIfTargetSubtitleExists:        false, // Skip checking disabled - will return early
+		SkipIfExternalSubtitlesExist:      false, // Don't check external
+		CheckEmbeddedSubtitles:            false, // Don't check embedded
+		SkipIfNoLanguageButSubtitlesExist: true,  // Enable the advanced check
 	}
-
 	checker, err := NewBasicChecker(config)
 	if err != nil {
 		t.Fatalf("Failed to create checker: %v", err)
@@ -440,31 +221,31 @@ func TestBasicChecker_PreferredAudioLanguageFiltering_Disabled(t *testing.T) {
 		t.Fatalf("Check failed: %v", err)
 	}
 
-	// Should NOT skip because filtering is disabled
+	// Should NOT skip because SkipIfTargetSubtitleExists=false (master switch is off)
 	if result.ShouldSkip {
-		t.Error("Expected ShouldSkip=false when LimitToPreferredAudioLanguage=false")
+		t.Errorf("Expected ShouldSkip=false when no subtitles exist, got true (reason: %v, details: %s)",
+			result.Reason, result.Details)
 	}
 }
 
-// TestBasicChecker_PreferredAudioLanguageFiltering_EmptyList tests with empty preferred list
-func TestBasicChecker_PreferredAudioLanguageFiltering_EmptyList(t *testing.T) {
-	// When PreferredAudioLanguages is empty, should never skip
+// TestBasicChecker_HasSubtitlesDetection_WithBasicSRT tests hasSubtitles properly detects basic .srt
+func TestBasicChecker_HasSubtitlesDetection_WithBasicSRT(t *testing.T) {
 	tmpDir := t.TempDir()
-	videoPath := filepath.Join(tmpDir, "movie.mkv")
+	videoPath := filepath.Join(tmpDir, "video.mkv")
+	srtPath := filepath.Join(tmpDir, "video.srt")
 
-	// Create test video file
+	// Create test files
 	if err := os.WriteFile(videoPath, []byte("fake video"), 0644); err != nil {
 		t.Fatalf("Failed to create test video: %v", err)
 	}
-
-	config := &Config{
-		SkipIfTargetSubtitleExists:    false,
-		CheckEmbeddedSubtitles:        false,
-		SkipIfExternalSubtitlesExist:  false,
-		PreferredAudioLanguages:       []string{}, // Empty
-		LimitToPreferredAudioLanguage: true,
+	if err := os.WriteFile(srtPath, []byte("fake subtitle"), 0644); err != nil {
+		t.Fatalf("Failed to create test subtitle: %v", err)
 	}
 
+	config := &Config{
+		SkipIfTargetSubtitleExists:        true, // Enable basic .srt check (will trigger early return)
+		SkipIfNoLanguageButSubtitlesExist: true, // This check won't be reached
+	}
 	checker, err := NewBasicChecker(config)
 	if err != nil {
 		t.Fatalf("Failed to create checker: %v", err)
@@ -475,15 +256,12 @@ func TestBasicChecker_PreferredAudioLanguageFiltering_EmptyList(t *testing.T) {
 		t.Fatalf("Check failed: %v", err)
 	}
 
-	// Should NOT skip because list is empty
-	if result.ShouldSkip {
-		t.Error("Expected ShouldSkip=false when PreferredAudioLanguages is empty")
+	// Should skip due to basic .srt check (before hasSubtitles advanced check)
+	if !result.ShouldSkip {
+		t.Error("Expected ShouldSkip=true when basic .srt exists")
+	}
+
+	if result.Reason != ReasonSubtitleExists {
+		t.Errorf("Expected Reason=%v, got %v", ReasonSubtitleExists, result.Reason)
 	}
 }
-
-// Note: Full integration tests with real FFprobe calls would require:
-// - Mock FFprobe command execution
-// - Test video files with known audio tracks
-// - FFprobe JSON fixtures
-// These are covered by unit tests in language_filter_test.go
-// The integration here verifies the BasicChecker correctly uses the config

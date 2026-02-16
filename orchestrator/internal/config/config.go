@@ -4,6 +4,7 @@ import (
 	"fmt"
 	"os"
 	"strings"
+	"time"
 
 	"github.com/sirupsen/logrus"
 	"github.com/spf13/viper"
@@ -29,6 +30,9 @@ type Config struct {
 	// Transcription Options (passed to worker)
 	Transcription TranscriptionConfig
 
+	// Whisper Advanced Configuration
+	Whisper WhisperConfig
+
 	// Processing Control
 	ProcessAddedMedia  bool
 	ProcessMediaOnPlay bool
@@ -41,6 +45,9 @@ type Config struct {
 
 	// Monitoring Configuration
 	Monitor MonitorConfig
+
+	// ASR Configuration
+	ASR ASRConfig
 }
 
 type PlexConfig struct {
@@ -110,6 +117,10 @@ type MonitorConfig struct {
 	StabilityChecks   int
 	StabilityWait     int // seconds
 	StabilityTimeout  int // seconds
+}
+
+type ASRConfig struct {
+	Timeout time.Duration // Timeout for ASR requests (default 30s)
 }
 
 // Load reads configuration from environment variables
@@ -204,7 +215,18 @@ func Load() (*Config, error) {
 			StabilityWait:     v.GetInt("FILE_STABILITY_WAIT"),
 			StabilityTimeout:  v.GetInt("FILE_STABILITY_TIMEOUT"),
 		},
+
+		ASR: ASRConfig{
+			Timeout: time.Duration(v.GetInt("ASR_TIMEOUT")) * time.Second,
+		},
 	}
+
+	// Parse and validate WhisperConfig (advanced options)
+	whisperConfig, err := loadWhisperConfig(v)
+	if err != nil {
+		return nil, fmt.Errorf("failed to load Whisper configuration: %w", err)
+	}
+	config.Whisper = *whisperConfig
 
 	// Validate
 	if err := validate(config); err != nil {
@@ -282,6 +304,15 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("FILE_STABILITY_CHECKS", 3)
 	v.SetDefault("FILE_STABILITY_WAIT", 2)
 	v.SetDefault("FILE_STABILITY_TIMEOUT", 60)
+
+	// ASR
+	v.SetDefault("ASR_TIMEOUT", 30) // 30 seconds default
+
+	// Whisper Advanced Options
+	v.SetDefault("SUBGEN_KWARGS", "")       // Empty JSON by default
+	v.SetDefault("USE_MODEL_PROMPT", false) // Disabled by default
+	v.SetDefault("CUSTOM_MODEL_PROMPT", "") // No custom prompt by default
+	v.SetDefault("COMPUTE_TYPE", "auto")    // Auto-detect compute type
 }
 
 // validate performs validation on the config struct

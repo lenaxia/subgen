@@ -282,3 +282,52 @@ func TestMonitor_Integration_NewDirectoryCreated(t *testing.T) {
 	assert.Len(t, queuedFiles, 1, "Should detect file in newly created directory")
 	assert.Contains(t, queuedFiles, file1, "Should detect file in new subdirectory")
 }
+
+// TestMonitor_Integration_SkipLogic tests skip logic integration with file monitoring
+func TestMonitor_Integration_SkipLogic(t *testing.T) {
+	tmpDir, err := os.MkdirTemp("", "integration_skip_*")
+	require.NoError(t, err)
+	defer os.RemoveAll(tmpDir)
+
+	// Track queued files
+	queuedFiles := make([]string, 0)
+	callback := func(path string) {
+		queuedFiles = append(queuedFiles, path)
+	}
+
+	// Create and start watcher (no skip checker at watcher level)
+	log := logrus.New()
+	log.SetLevel(logrus.ErrorLevel)
+	config := monitor.DefaultConfig()
+	config.StabilityChecks = 0
+
+	fw, err := monitor.NewFileWatcher([]string{tmpDir}, callback, config, log)
+	require.NoError(t, err)
+
+	ctx, cancel := context.WithTimeout(context.Background(), 5*time.Second)
+	defer cancel()
+
+	go fw.Watch(ctx)
+	time.Sleep(200 * time.Millisecond)
+
+	// Create file with existing .srt subtitle (should be filtered by downstream skip logic)
+	fileWithSubtitle := filepath.Join(tmpDir, "movie_with_sub.mkv")
+	subtitleFile := filepath.Join(tmpDir, "movie_with_sub.srt")
+	require.NoError(t, os.WriteFile(fileWithSubtitle, []byte("test"), 0644))
+	require.NoError(t, os.WriteFile(subtitleFile, []byte("subtitle content"), 0644))
+	time.Sleep(200 * time.Millisecond)
+
+	// Create file without subtitle (should be queued)
+	fileWithoutSubtitle := filepath.Join(tmpDir, "movie_no_sub.mkv")
+	require.NoError(t, os.WriteFile(fileWithoutSubtitle, []byte("test"), 0644))
+	time.Sleep(200 * time.Millisecond)
+
+	// Verify both files detected by watcher (skip logic happens downstream in scanner/queue)
+	// The watcher just detects all media files and passes them to callback
+	assert.Len(t, queuedFiles, 2, "Watcher should detect all media files")
+	assert.Contains(t, queuedFiles, fileWithSubtitle, "Should detect file with subtitle")
+	assert.Contains(t, queuedFiles, fileWithoutSubtitle, "Should detect file without subtitle")
+
+	// Note: Skip logic filtering happens in Scanner.ScanDirectory() or queue handler,
+	// not in FileWatcher. This test verifies watcher correctly passes all media files.
+}

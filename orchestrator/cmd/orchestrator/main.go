@@ -450,6 +450,14 @@ func (td *TaskDispatcher) Run(ctx context.Context) {
 func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 	defer td.queue.MarkDone(task.ID)
 
+	// Helper to send result to result channel if present
+	sendResult := func(result *queue.TranscriptionResult) {
+		if task.ResultChan != nil {
+			defer close(task.ResultChan)
+			task.ResultChan <- result
+		}
+	}
+
 	td.log.WithFields(logrus.Fields{
 		"task_id":   task.ID,
 		"file_path": task.FilePath,
@@ -461,6 +469,9 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		filePath, err := td.plexClient.GetFilePath(ctx, task.PlexItemID)
 		if err != nil {
 			td.log.WithError(err).WithField("plex_item_id", task.PlexItemID).Error("Failed to fetch file path from Plex")
+			sendResult(&queue.TranscriptionResult{
+				Error: fmt.Errorf("failed to fetch file path from Plex: %w", err),
+			})
 			return
 		}
 		task.FilePath = filePath
@@ -475,6 +486,9 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		filePath, err := td.jellyfinClient.GetFilePath(ctx, task.JellyfinItemID)
 		if err != nil {
 			td.log.WithError(err).WithField("jellyfin_item_id", task.JellyfinItemID).Error("Failed to fetch file path from Jellyfin")
+			sendResult(&queue.TranscriptionResult{
+				Error: fmt.Errorf("failed to fetch file path from Jellyfin: %w", err),
+			})
 			return
 		}
 		task.FilePath = filePath
@@ -488,6 +502,9 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 	worker, err := td.workerPool.SelectWorker()
 	if err != nil {
 		td.log.WithError(err).Error("Failed to select worker")
+		sendResult(&queue.TranscriptionResult{
+			Error: fmt.Errorf("failed to select worker: %w", err),
+		})
 		return
 	}
 
@@ -495,11 +512,17 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 	resp, err := td.grpcClient.Transcribe(ctx, worker.Address, task)
 	if err != nil {
 		td.log.WithError(err).Error("Transcription failed")
+		sendResult(&queue.TranscriptionResult{
+			Error: fmt.Errorf("transcription failed: %w", err),
+		})
 		return
 	}
 
 	if !resp.Success {
 		td.log.WithField("error", resp.ErrorMessage).Error("Transcription unsuccessful")
+		sendResult(&queue.TranscriptionResult{
+			Error: fmt.Errorf("transcription unsuccessful: %s", resp.ErrorMessage),
+		})
 		return
 	}
 
@@ -507,6 +530,20 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		"subtitle_path":     resp.SubtitlePath,
 		"detected_language": resp.DetectedLanguage,
 	}).Info("Transcription completed successfully")
+
+	// Send result to result channel if present
+	// NOTE: Currently we don't have segments in the gRPC response
+	// For STORY_05, we'll need to enhance the gRPC protocol to return segments
+	// For now, we return success with metadata only
+	sendResult(&queue.TranscriptionResult{
+		Segments: []queue.Segment{}, // TODO: Populate from worker response in future
+		Metadata: queue.Metadata{
+			Language: resp.DetectedLanguage,
+			Duration: float64(resp.Stats.GetDurationSeconds()),
+			Model:    "", // Not available in current response
+		},
+		Error: nil,
+	})
 
 	// Refresh metadata if needed
 	if task.PlexItemID != "" && td.plexClient != nil {

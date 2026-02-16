@@ -20,6 +20,9 @@ type Metrics struct {
 	WorkerCount   prometheus.Gauge
 	WorkerHealthy prometheus.Gauge
 
+	// Skip logic metrics (STORY_07)
+	FilesSkipped *prometheus.CounterVec
+
 	// Application up indicator
 	Up prometheus.Gauge
 
@@ -74,6 +77,15 @@ func NewMetricsWithRegistry(registry *prometheus.Registry) *Metrics {
 		Help: "Always 1 - indicates service is up",
 	})
 
+	// Skip logic metrics (STORY_07)
+	filesSkipped := prometheus.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subgen_files_skipped_total",
+			Help: "Total number of files skipped by skip logic",
+		},
+		[]string{"reason"},
+	)
+
 	// Register metrics
 	registry.Register(httpRequests)
 	registry.Register(httpDuration)
@@ -81,6 +93,7 @@ func NewMetricsWithRegistry(registry *prometheus.Registry) *Metrics {
 	registry.Register(workerCount)
 	registry.Register(workerHealthy)
 	registry.Register(up)
+	registry.Register(filesSkipped)
 
 	return &Metrics{
 		HTTPRequests:         httpRequests,
@@ -89,6 +102,7 @@ func NewMetricsWithRegistry(registry *prometheus.Registry) *Metrics {
 		WorkerCount:          workerCount,
 		WorkerHealthy:        workerHealthy,
 		Up:                   up,
+		FilesSkipped:         filesSkipped,
 		registry:             registry,
 	}
 }
