@@ -68,9 +68,10 @@ func TestConnectionPool_MultipleWorkers(t *testing.T) {
 	assert.NotNil(t, conn3)
 
 	assert.Equal(t, 3, pool.Size())
-	assert.NotEqual(t, conn1, conn2)
-	assert.NotEqual(t, conn1, conn3)
-	assert.NotEqual(t, conn2, conn3)
+	// Use pointer comparison instead of deep equality to avoid races with gRPC internals
+	assert.True(t, conn1 != conn2, "conn1 and conn2 should be different pointers")
+	assert.True(t, conn1 != conn3, "conn1 and conn3 should be different pointers")
+	assert.True(t, conn2 != conn3, "conn2 and conn3 should be different pointers")
 }
 
 func TestConnectionPool_CloseAll(t *testing.T) {
@@ -112,5 +113,6 @@ func TestConnectionPool_RecreateClosedConnection(t *testing.T) {
 	// Get again - should create new connection
 	conn2, err := pool.Get(ctx, "localhost:50051")
 	require.NoError(t, err)
-	assert.NotEqual(t, conn1, conn2, "should create new connection after shutdown")
+	// Use pointer comparison instead of deep equality to avoid races with gRPC internals
+	assert.True(t, conn1 != conn2, "should create new connection after shutdown")
 }
