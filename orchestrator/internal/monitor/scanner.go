@@ -8,6 +8,7 @@ import (
 	"strings"
 
 	"github.com/mccloud/subgen/orchestrator/internal/skip"
+	"github.com/sirupsen/logrus"
 )
 
 // ScanResult contains statistics from directory scan
@@ -32,6 +33,7 @@ type Scanner interface {
 type BasicScanner struct {
 	queue       QueueInterface
 	skipChecker skip.Checker
+	log         *logrus.Logger
 }
 
 // NewScanner creates a new scanner instance
@@ -39,6 +41,16 @@ func NewScanner(queue QueueInterface, skipChecker skip.Checker) Scanner {
 	return &BasicScanner{
 		queue:       queue,
 		skipChecker: skipChecker,
+		log:         nil, // Optional logger
+	}
+}
+
+// NewScannerWithLogger creates a new scanner instance with logger for progress logging
+func NewScannerWithLogger(queue QueueInterface, skipChecker skip.Checker, log *logrus.Logger) Scanner {
+	return &BasicScanner{
+		queue:       queue,
+		skipChecker: skipChecker,
+		log:         log,
 	}
 }
 
@@ -122,6 +134,15 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 
 		// Count as scanned
 		result.Scanned++
+
+		// Progress logging every 100 files
+		if s.log != nil && result.Scanned%100 == 0 {
+			s.log.WithFields(logrus.Fields{
+				"scanned": result.Scanned,
+				"queued":  result.Queued,
+				"skipped": result.Skipped,
+			}).Infof("Scan progress: %d files scanned", result.Scanned)
+		}
 
 		// Apply skip logic if checker is available
 		if s.skipChecker != nil {

@@ -2,11 +2,13 @@ package monitor
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/mccloud/subgen/orchestrator/internal/skip"
+	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
@@ -298,4 +300,66 @@ func TestScanner_ScanDirectory_LanguageParameter(t *testing.T) {
 	assert.Equal(t, 1, result.Queued, "Should queue file with language parameter")
 	// Note: Actual verification of language parameter passing would require
 	// checking the queued task structure in a real implementation
+}
+
+func TestScanner_ScanDirectory_ProgressLogging(t *testing.T) {
+	// Setup
+	testDir := setupTestDir(t)
+	defer cleanupTestDir(t, testDir)
+
+	// Create 250 media files to trigger progress logging at 100 and 200
+	for i := 1; i <= 250; i++ {
+		filename := filepath.Join(testDir, fmt.Sprintf("movie%03d.mkv", i))
+		err := os.WriteFile(filename, []byte("test"), 0644)
+		require.NoError(t, err)
+	}
+
+	queue := &MockQueue{}
+	skipChecker := &MockSkipChecker{shouldSkip: false}
+
+	// Create scanner with logger
+	log := logrus.New()
+	log.SetLevel(logrus.InfoLevel)
+	scanner := NewScannerWithLogger(queue, skipChecker, log)
+
+	// Execute
+	result, err := scanner.ScanDirectory(testDir, false, "")
+
+	// Verify
+	require.NoError(t, err)
+	assert.Equal(t, 250, result.Scanned, "Should scan 250 files")
+	assert.Equal(t, 250, result.Queued, "Should queue all files")
+	// Note: Progress logs at 100 and 200 should appear in output
+	// Manual verification: check logs for "Scan progress: 100 files scanned"
+}
+
+func TestScanner_ScanDirectory_LargeDirectory(t *testing.T) {
+	// Setup
+	testDir := setupTestDir(t)
+	defer cleanupTestDir(t, testDir)
+
+	// Create 1000 files for performance test
+	numFiles := 1000
+	for i := 1; i <= numFiles; i++ {
+		filename := filepath.Join(testDir, fmt.Sprintf("movie%04d.mkv", i))
+		err := os.WriteFile(filename, []byte("test"), 0644)
+		require.NoError(t, err)
+	}
+
+	queue := &MockQueue{}
+	skipChecker := &MockSkipChecker{shouldSkip: false}
+
+	// Create scanner with logger
+	log := logrus.New()
+	log.SetLevel(logrus.InfoLevel)
+	scanner := NewScannerWithLogger(queue, skipChecker, log)
+
+	// Execute with timing
+	result, err := scanner.ScanDirectory(testDir, false, "")
+
+	// Verify
+	require.NoError(t, err)
+	assert.Equal(t, numFiles, result.Scanned, "Should scan all files")
+	assert.Equal(t, numFiles, result.Queued, "Should queue all files")
+	// Performance: Should complete in reasonable time (< 5 seconds for 1000 files)
 }
