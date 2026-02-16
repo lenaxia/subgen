@@ -8,6 +8,7 @@ import (
 	"os"
 	"os/signal"
 	"runtime"
+	"strings"
 	"syscall"
 	"time"
 
@@ -15,6 +16,7 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/discovery"
 	"github.com/mccloud/subgen/orchestrator/internal/grpc_client"
 	"github.com/mccloud/subgen/orchestrator/internal/mediaserver"
+	"github.com/mccloud/subgen/orchestrator/internal/middleware"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/mccloud/subgen/orchestrator/internal/observability"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
@@ -84,8 +86,11 @@ func main() {
 	}
 	log.SetLevel(level)
 
-	// Log startup
+	// Print startup banner
 	buildInfo := GetBuildInfo()
+	printStartupBanner(cfg, buildInfo, log)
+
+	// Log structured startup info
 	log.WithFields(logrus.Fields{
 		"version":    buildInfo.Version,
 		"go_version": buildInfo.GoVersion,
@@ -201,6 +206,7 @@ func main() {
 
 	// Register observability middleware
 	app := webhookServer.App()
+	app.Use(middleware.RequestID(log))
 	app.Use(observability.PanicRecoveryMiddleware(log))
 	app.Use(observability.RequestLoggerMiddleware(obsMetrics, log))
 
@@ -390,6 +396,53 @@ func FormatVersion(w io.Writer) error {
 	}
 	_, err = fmt.Fprintf(w, "  Git Commit: %s\n", info.GitCommit)
 	return err
+}
+
+// printStartupBanner prints a formatted startup banner with configuration summary
+func printStartupBanner(cfg *config.Config, info BuildInfo, log *logrus.Logger) {
+	banner := "============================================================"
+	log.Info(banner)
+	log.Infof("          Subgen Orchestrator v%s", info.Version)
+	log.Info(banner)
+	log.Info("Configuration:")
+	log.Infof("  - Whisper Model: %s", cfg.Transcription.WhisperModel)
+	log.Infof("  - Device: %s", cfg.Transcription.Device)
+	log.Infof("  - Worker Discovery: %s", cfg.Worker.Discovery)
+	log.Infof("  - Queue Size: %d", cfg.Queue.MaxSize)
+	log.Infof("  - Log Level: %s", cfg.LogLevel)
+
+	// Skip logic summary
+	skipEnabled := cfg.Skip.IfTargetSubtitlesExist || cfg.Skip.IfExternalSubtitlesExist ||
+		len(cfg.Skip.SubtitleLanguages) > 0 || len(cfg.Skip.AudioLanguages) > 0
+	if skipEnabled {
+		log.Info("  - Skip Logic: enabled")
+	} else {
+		log.Info("  - Skip Logic: disabled")
+	}
+
+	// Monitoring summary
+	if cfg.Monitor.Enabled {
+		log.Infof("  - Monitoring: enabled (%d folders)", len(cfg.Monitor.TranscribeFolders))
+	} else {
+		log.Info("  - Monitoring: disabled")
+	}
+
+	// Media server integration
+	integrations := []string{}
+	if cfg.Plex.Enabled {
+		integrations = append(integrations, "Plex")
+	}
+	if cfg.Jellyfin.Enabled {
+		integrations = append(integrations, "Jellyfin")
+	}
+	if len(integrations) > 0 {
+		log.Infof("  - Media Servers: %s", strings.Join(integrations, ", "))
+	}
+
+	log.Info(banner)
+	log.Infof("Webhook server listening on :%d", cfg.WebhookPort)
+	log.Infof("Metrics server listening on :%d", cfg.MetricsPort)
+	log.Info(banner)
 }
 
 // PrintVersion prints the version information and exits
