@@ -1,10 +1,11 @@
 package webhooks
 
 import (
-	_ "bytes" // STORY_05: Will be used for formatting ASR responses
+	"bytes"
 	"context"
 	"encoding/json"
 	"fmt"
+	"strings"
 	"time"
 
 	"github.com/gofiber/fiber/v2"
@@ -15,7 +16,7 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
 	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/mccloud/subgen/orchestrator/internal/util"
-	_ "github.com/mccloud/subgen/orchestrator/pkg/formats" // STORY_05: Will be used for formatting ASR responses
+	"github.com/mccloud/subgen/orchestrator/pkg/formats"
 	pb "github.com/mccloud/subgen/orchestrator/pkg/pb"
 	"github.com/sirupsen/logrus"
 )
@@ -696,6 +697,9 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 	videoFile := c.Query("video_file", "")
 	output := c.Query("output", "srt")
 
+	// STORY_05: Normalize format to lowercase for case-insensitive comparison
+	output = strings.ToLower(strings.TrimSpace(output))
+
 	// STORY_05: Validate format
 	validFormats := map[string]bool{
 		"srt":  true,
@@ -833,20 +837,51 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 			})
 		}
 
-		// TODO STORY_05: Convert segments to requested format
-		// For now, return placeholder (STORY_05 will implement format conversion)
+		// STORY_05: Convert segments to requested format
 		s.log.WithFields(map[string]interface{}{
 			"segments": len(result.Segments),
 			"language": result.Metadata.Language,
 			"duration": result.Metadata.Duration,
-		}).Info("ASR transcription completed")
+			"format":   output,
+		}).Info("ASR transcription completed, converting to format")
 
-		return c.SendString(fmt.Sprintf(
-			"Transcription completed: %d segments, language: %s, duration: %.2fs (format conversion TODO in STORY_05)",
-			len(result.Segments),
-			result.Metadata.Language,
-			result.Metadata.Duration,
-		))
+		// Convert queue.Segment to formats.Segment
+		formatSegments := make([]formats.Segment, len(result.Segments))
+		for i, seg := range result.Segments {
+			formatSegments[i] = formats.Segment{
+				Start: seg.Start,
+				End:   seg.End,
+				Text:  seg.Text,
+			}
+		}
+
+		// Convert queue.Metadata to formats.Metadata
+		formatMetadata := formats.Metadata{
+			Language: result.Metadata.Language,
+			Duration: result.Metadata.Duration,
+		}
+
+		// Use format writer to convert segments
+		var buffer bytes.Buffer
+		writer, err := formats.NewWriter(output)
+		if err != nil {
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("unsupported format: %s", output),
+			})
+		}
+
+		if err := writer.Write(&buffer, formatSegments, formatMetadata); err != nil {
+			s.log.WithError(err).Error("Format conversion failed")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": fmt.Sprintf("format conversion failed: %v", err),
+			})
+		}
+
+		// Set Content-Type header based on format
+		c.Set("Content-Type", getContentType(output))
+
+		// Return formatted subtitles
+		return c.SendString(buffer.String())
 
 	case <-time.After(timeout):
 		s.log.WithField("timeout", timeout).Warn("ASR transcription timeout")
