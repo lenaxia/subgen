@@ -492,7 +492,7 @@ type WorkerPoolAdapter struct {
 
 // GetWorkers implements observability.WorkerPool
 func (w *WorkerPoolAdapter) GetWorkers() ([]observability.Worker, error) {
-	w.pool.Refresh(context.Background())
+	_ = w.pool.Refresh(context.Background())
 
 	// Access workers (need to add GetAll method to Pool)
 	// For now, return empty slice - this will be improved
@@ -535,7 +535,9 @@ func (td *TaskDispatcher) Run(ctx context.Context) {
 
 // dispatchTask sends a single task to a worker via gRPC
 func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
-	defer td.queue.MarkDone(task.ID)
+	defer func() {
+		_ = td.queue.MarkDone(task.ID)
+	}()
 
 	// Helper to send result to result channel if present
 	sendResult := func(result *queue.TranscriptionResult) {
@@ -847,7 +849,7 @@ func (td *TaskDispatcher) parseLRCTimestamp(ts string) float64 {
 // parseFloat is a helper to parse float from string
 func parseFloat(s string) float64 {
 	var f float64
-	fmt.Sscanf(s, "%f", &f)
+	_, _ = fmt.Sscanf(s, "%f", &f)
 	return f
 }
 

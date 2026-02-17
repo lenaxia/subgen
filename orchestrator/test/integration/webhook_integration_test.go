@@ -173,7 +173,7 @@ func TestPlex_MediaPlay_Success(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	writer.WriteField("payload", payload)
+	_ = writer.WriteField("payload", payload)
 	writer.Close()
 
 	req, err := http.NewRequest("POST", "/plex", body)
@@ -314,7 +314,7 @@ func TestPlex_InvalidPayload(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	writer.WriteField("payload", payload)
+	_ = writer.WriteField("payload", payload)
 	writer.Close()
 
 	req, err := http.NewRequest("POST", "/plex", body)
@@ -344,7 +344,7 @@ func TestPlex_MissingUserAgent(t *testing.T) {
 
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	writer.WriteField("payload", payload)
+	_ = writer.WriteField("payload", payload)
 	writer.Close()
 
 	req, err := http.NewRequest("POST", "/plex", body)

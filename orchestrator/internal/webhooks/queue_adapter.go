@@ -18,7 +18,7 @@ func NewQueueAdapter(q *queue.Queue) *QueueAdapter {
 func (a *QueueAdapter) Enqueue(task Task) error {
 	// Determine task type based on context
 	taskType := queue.TaskTypeTranscribe
-	if task.AudioContent != nil && len(task.AudioContent) > 0 {
+	if len(task.AudioContent) > 0 {
 		// ASR tasks have AudioContent
 		taskType = queue.TaskTypeASR
 	} else if task.ForceLanguage == "" && task.FilePath != "" {

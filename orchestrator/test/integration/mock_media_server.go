@@ -146,7 +146,7 @@ func (m *MockMediaServer) handlePlexMetadata(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleJellyfinItem handles Jellyfin item requests
@@ -171,7 +171,7 @@ func (m *MockMediaServer) handleJellyfinItem(w http.ResponseWriter, r *http.Requ
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }
 
 // handleJellyfinUsers handles Jellyfin users requests
@@ -189,5 +189,5 @@ func (m *MockMediaServer) handleJellyfinUsers(w http.ResponseWriter, r *http.Req
 	}
 
 	w.Header().Set("Content-Type", "application/json")
-	json.NewEncoder(w).Encode(response)
+	_ = json.NewEncoder(w).Encode(response)
 }

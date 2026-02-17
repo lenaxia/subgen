@@ -59,7 +59,8 @@ func TestHandleQueueStatus_Idle(t *testing.T) {
 	require.NoError(t, err)
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
 
 	assert.Equal(t, "idle", result["status"])
 	assert.Equal(t, float64(0), result["queued"])
@@ -89,7 +90,8 @@ func TestHandleQueueProcessing(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
 
 	tasks := result["tasks"].([]interface{})
 	assert.Len(t, tasks, 2)
@@ -117,7 +119,8 @@ func TestHandleQueueHistory(t *testing.T) {
 	assert.Equal(t, http.StatusOK, resp.StatusCode)
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
 
 	tasks := result["tasks"].([]interface{})
 	assert.Len(t, tasks, 5)
