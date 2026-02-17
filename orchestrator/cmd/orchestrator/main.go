@@ -601,6 +601,12 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		tempFilePath = tmpFile.Name()
 		defer os.Remove(tempFilePath) // Clean up after transcription
 
+		// Set file permissions so worker can read it (different user)
+		if err := os.Chmod(tempFilePath, 0666); err != nil {
+			tmpFile.Close()
+			td.log.WithError(err).Error("Failed to set permissions on temp file")
+		}
+
 		// Write audio content to temp file
 		if _, err := tmpFile.Write(task.AudioContent); err != nil {
 			tmpFile.Close()

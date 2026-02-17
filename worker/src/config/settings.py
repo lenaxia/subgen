@@ -399,6 +399,7 @@ class ModelLifecycleConfig(BaseSettings):
 
     cleanup_delay: int = Field(
         default=30,
+        validation_alias=AliasChoices("CLEANUP_DELAY", "MODEL_CLEANUP_DELAY"),
         ge=0,
         description="Seconds to wait before unloading model after last use",
     )

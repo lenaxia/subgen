@@ -167,6 +167,12 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 success=False, error_message=f"Language detection failed: {str(e)}"
             )
 
+        finally:
+            # Schedule model cleanup if cleanup is enabled
+            if self.config.model_lifecycle.clear_vram_on_complete:
+                self.model_manager.schedule_cleanup()
+                logger.debug("Scheduled model cleanup after language detection")
+
     def Transcribe(
         self, request: transcription_pb2.TranscribeRequest, context: grpc.ServicerContext
     ) -> transcription_pb2.TranscribeResponse:
@@ -276,3 +282,11 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             # Always decrement active jobs
             self.stats["jobs_active"] -= 1
             logger.debug(f"Transcribe: jobs_active={self.stats['jobs_active']}")
+
+            # Schedule model cleanup if no active jobs and cleanup is enabled
+            if (
+                self.stats["jobs_active"] == 0
+                and self.config.model_lifecycle.clear_vram_on_complete
+            ):
+                self.model_manager.schedule_cleanup()
+                logger.debug("Scheduled model cleanup after transcription")

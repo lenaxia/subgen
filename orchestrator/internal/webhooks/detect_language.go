@@ -99,8 +99,8 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 	}
 	defer src.Close()
 
-	// Create temporary file in system temp directory
-	tmpFile, err := os.CreateTemp("", "detect-*.tmp")
+	// Create temporary file in shared media volume accessible by worker
+	tmpFile, err := os.CreateTemp("/media", "detect-*.tmp")
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Status: "error",
@@ -119,6 +119,14 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 		})
 	}
 	tmpFile.Close()
+
+	// Set world-readable permissions so worker container can access file
+	if err := os.Chmod(tmpPath, 0644); err != nil {
+		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
+			Status: "error",
+			Error:  fmt.Sprintf("failed to set file permissions: %v", err),
+		})
+	}
 
 	// Select a worker
 	if s.workerPool == nil {

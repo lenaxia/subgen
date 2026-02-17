@@ -1,0 +1,116 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    image: ghcr.io/lenaxia/subgen-orchestrator:0.1.9-test
+    container_name: subgen-orchestrator-test
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # Webhook and API port
+      - "9090:9090"  # Metrics port (Prometheus)
+    environment:
+      # Worker Connection (Required)
+      - WORKER_ADDRESS=worker:50051
+      
+      # Media Server Configuration (testing with dummy tokens)
+      - PLEX_SERVER=http://192.168.5.104:32400
+      - PLEX_TOKEN=test_token_12345  # Dummy token for testing
+      - PLEX_ENABLED=true  # Enable for webhook testing
+      - JELLYFIN_SERVER=http://192.168.5.144:8096
+      - JELLYFIN_TOKEN=test_token_67890  # Dummy token for testing  
+      - JELLYFIN_ENABLED=true  # Enable for webhook testing
+      
+      # Processing Settings
+      - PROCESS_ADDED_MEDIA=true
+      - PROCESS_MEDIA_ON_PLAY=true
+      - SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE=eng
+      
+      # File System Monitoring (enable for testing)
+      - MONITOR=true
+      - TRANSCRIBE_FOLDERS=/testdata
+      
+      # Plex Episode Queueing
+      - PLEX_QUEUE_NEXT_EPISODE=true
+      - PLEX_QUEUE_SEASON=false
+      - PLEX_QUEUE_SERIES=false
+      
+      # Skip Logic Configuration
+      - SKIP_IF_EXTERNAL_SUBTITLES_EXIST=true
+      - SKIP_IF_TARGET_SUBTITLES_EXIST=true
+      - SKIP_SUBTITLE_LANGUAGES=
+      - SKIP_IF_AUDIO_LANGUAGES=
+      - SKIP_ONLY_SUBGEN_SUBTITLES=false
+      - SKIP_UNKNOWN_LANGUAGE=false
+      
+      # Path Mapping (enabled for testing)
+      - USE_PATH_MAPPING=true
+      - PATH_MAPPING_FROM=/testdata
+      - PATH_MAPPING_TO=/testdata
+      
+      # Subtitle Configuration
+      - SUBTITLE_LANGUAGE_NAME=aa
+      - WORD_LEVEL_HIGHLIGHT=false
+      
+      # Debug
+      - DEBUG=true
+      - WEBHOOK_PORT=9000
+    volumes:
+      - ./test/testdata:/testdata:ro
+      - ./test/output:/output
+      - media-temp:/media
+    depends_on:
+      - worker
+    networks:
+      - subgen-test
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost:9000/health"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+  worker:
+    image: ghcr.io/lenaxia/subgen-worker:0.1.9-test-cpu
+    container_name: subgen-worker-test
+    restart: unless-stopped
+    ports:
+      - "50051:50051"  # gRPC port
+    environment:
+      # Transcription Settings
+      - TRANSCRIBE_DEVICE=cpu
+      - WHISPER_MODEL=tiny  # Use tiny model for fast testing
+      - CONCURRENT_TRANSCRIPTIONS=2
+      - WHISPER_THREADS=4
+      - COMPUTE_TYPE=int8
+      
+      # Model Storage
+      - MODEL_PATH=/models
+      
+      # Memory Management
+      - CLEAR_VRAM_ON_COMPLETE=true
+      - CLEANUP_DELAY=5  # Shorter delay for testing
+      - MODEL_CLEANUP_DELAY=5  # Shorter delay for testing (legacy compatibility)
+      
+      # Subtitle Formatting
+      - LRC_FOR_AUDIO_FILES=true
+      - CUSTOM_REGROUP=cm_sl=84_sl=42++++++1
+      - USE_MODEL_PROMPT=false
+      - DEBUG=true
+    volumes:
+      - ./test/testdata:/testdata:ro
+      - ./test/output:/output
+      - ./models:/models  # Persistent model storage
+      - media-temp:/media
+    networks:
+      - subgen-test
+    healthcheck:
+      test: ["CMD-SHELL", "pgrep -f worker.py || exit 1"]
+      interval: 5s
+      timeout: 3s
+      retries: 3
+
+networks:
+  subgen-test:
+    driver: bridge
+
+volumes:
+  media-temp:
