@@ -149,6 +149,8 @@ jobs:
           GRPC_WORKER_ADDR=localhost:50051 \
           PROCESS_ADDED_MEDIA=true \
           PROCESS_MEDIA_ON_PLAY=true \
+          PLEX_ENABLED=false \
+          JELLYFIN_ENABLED=false \
           ./bin/orchestrator &
           echo "ORCHESTRATOR_PID=$!" >> $GITHUB_ENV
           sleep 5
@@ -232,7 +234,7 @@ jobs:
             worker:
               build:
                 context: ./worker
-                dockerfile: Dockerfile.cpu
+                dockerfile: Dockerfile.system-av
               environment:
                 - WHISPER_MODEL=tiny
                 - TRANSCRIBE_DEVICE=cpu
