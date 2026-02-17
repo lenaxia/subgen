@@ -183,7 +183,7 @@ func PanicRecoveryMiddleware(log *logrus.Logger) fiber.Handler {
 					"path":  c.Path(),
 				}).Error("Panic recovered")
 
-				c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				_ = c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
 					"error": "Internal server error",
 				})
 			}

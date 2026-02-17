@@ -91,7 +91,7 @@ func TestCheckContextCancellation(t *testing.T) {
 	// Check should handle cancelled context gracefully
 	// For basic file existence, we don't need to check cancellation,
 	// but the interface accepts context for future use
-	_, err = checker.Check(ctx, "testdata/video.mkv")
+	_, _ = checker.Check(ctx, "testdata/video.mkv")
 	// Error handling depends on implementation
 	// For now, we just verify the call doesn't panic
 }

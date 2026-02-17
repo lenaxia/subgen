@@ -459,22 +459,6 @@ func parseStringListPipe(s string) []string {
 	return result
 }
 
-// parsePipeSeparatedList parses a pipe-separated string into a slice
-func parsePipeSeparatedList(s string) []string {
-	if s == "" {
-		return []string{}
-	}
-	parts := strings.Split(s, "|")
-	result := make([]string, 0, len(parts))
-	for _, part := range parts {
-		trimmed := strings.TrimSpace(part)
-		if trimmed != "" {
-			result = append(result, trimmed)
-		}
-	}
-	return result
-}
-
 // contains checks if a string slice contains a value
 func contains(slice []string, value string) bool {
 	for _, item := range slice {

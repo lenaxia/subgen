@@ -54,7 +54,8 @@ jobs:
       - name: Start Python worker
         working-directory: ./worker
         run: |
-          # Start worker in background
+          # Start worker in background with PYTHONPATH set to include worker directory
+          PYTHONPATH=$(pwd) \
           WHISPER_MODEL=tiny \
           TRANSCRIBE_DEVICE=cpu \
           MODEL_PATH=../models \
@@ -132,6 +133,7 @@ jobs:
       - name: Start Python worker
         working-directory: ./worker
         run: |
+          PYTHONPATH=$(pwd) \
           WHISPER_MODEL=tiny \
           TRANSCRIBE_DEVICE=cpu \
           MODEL_PATH=../models \
@@ -265,13 +267,13 @@ jobs:
 
       - name: Build and start services
         run: |
-          docker-compose -f docker-compose.test.yml build
-          docker-compose -f docker-compose.test.yml up -d
+          docker compose -f docker-compose.test.yml build
+          docker compose -f docker-compose.test.yml up -d
 
       - name: Wait for services
         run: |
           echo "Waiting for services to be healthy..."
-          timeout 120 bash -c 'until docker-compose -f docker-compose.test.yml ps | grep -q "healthy"; do sleep 2; done'
+          timeout 120 bash -c 'until docker compose -f docker-compose.test.yml ps | grep -q "healthy"; do sleep 2; done'
 
       - name: Test orchestrator endpoint
         run: |
@@ -282,15 +284,15 @@ jobs:
         if: always()
         run: |
           echo "=== Orchestrator logs ==="
-          docker-compose -f docker-compose.test.yml logs orchestrator
+          docker compose -f docker-compose.test.yml logs orchestrator
           echo ""
           echo "=== Worker logs ==="
-          docker-compose -f docker-compose.test.yml logs worker
+          docker compose -f docker-compose.test.yml logs worker
 
       - name: Stop services
         if: always()
         run: |
-          docker-compose -f docker-compose.test.yml down -v
+          docker compose -f docker-compose.test.yml down -v
 
   summary:
     name: E2E Test Summary

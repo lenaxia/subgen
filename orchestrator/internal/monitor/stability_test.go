@@ -214,7 +214,7 @@ func TestWaitForStability_Timeout(t *testing.T) {
 		counter := 0
 		for range ticker.C {
 			counter++
-			os.WriteFile(testFile, []byte("initial"+string(rune(counter))), 0644)
+			_ = os.WriteFile(testFile, []byte("initial"+string(rune(counter))), 0644)
 		}
 	}()
 
@@ -398,7 +398,7 @@ func TestFileWatcher_StabilityIntegration(t *testing.T) {
 
 	// Start watcher
 	go func() {
-		watcher.Watch(ctx)
+		_ = watcher.Watch(ctx)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -447,7 +447,7 @@ func TestFileWatcher_StabilityDisabled(t *testing.T) {
 
 	// Start watcher
 	go func() {
-		watcher.Watch(ctx)
+		_ = watcher.Watch(ctx)
 	}()
 
 	time.Sleep(100 * time.Millisecond)
@@ -493,7 +493,7 @@ func TestFileWatcher_StabilityTimeout(t *testing.T) {
 
 	// Start watcher
 	go func() {
-		watcher.Watch(ctx)
+		_ = watcher.Watch(ctx)
 	}()
 
 	time.Sleep(100 * time.Millisecond)

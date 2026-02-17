@@ -292,7 +292,9 @@ func TestHandleBatch_PermissionDenied(t *testing.T) {
 
 	err := os.Chmod(testDir, 0000)
 	require.NoError(t, err)
-	defer os.Chmod(testDir, 0755) // Restore for cleanup
+	defer func() {
+		_ = os.Chmod(testDir, 0755) // Restore for cleanup
+	}()
 
 	mockScanner := &MockScanner{
 		err: os.ErrPermission,

@@ -57,8 +57,8 @@ func TestEnqueue_DuplicateWhileProcessing(t *testing.T) {
 	task2 := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
 	// Enqueue and dequeue task1 (now processing)
-	q.Enqueue(task1)
-	q.Dequeue()
+	_ = q.Enqueue(task1)
+	_, _ = q.Dequeue()
 
 	// Try to enqueue duplicate
 	err := q.Enqueue(task2)
@@ -91,7 +91,7 @@ func TestDequeue_Success(t *testing.T) {
 	q := newTestQueue(100)
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	dequeuedTask, err := q.Dequeue()
 
 	require.NoError(t, err)
@@ -120,11 +120,11 @@ func TestPriorityOrdering(t *testing.T) {
 	task2 := NewTask("/media/asr.mp3", TaskTypeASR)               // Priority 1
 	task3 := NewTask("/media/detect.mkv", TaskTypeDetectLanguage) // Priority 0
 
-	q.Enqueue(task1)
+	_ = q.Enqueue(task1)
 	time.Sleep(1 * time.Millisecond) // Ensure different timestamps
-	q.Enqueue(task2)
+	_ = q.Enqueue(task2)
 	time.Sleep(1 * time.Millisecond)
-	q.Enqueue(task3)
+	_ = q.Enqueue(task3)
 
 	// Dequeue should return in priority order (0, 1, 2)
 	t1, _ := q.Dequeue()
@@ -145,11 +145,11 @@ func TestFIFO_WithinSamePriority(t *testing.T) {
 	task2 := NewTask("/media/movie2.mkv", TaskTypeTranscribe)
 	task3 := NewTask("/media/movie3.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task1)
+	_ = q.Enqueue(task1)
 	time.Sleep(1 * time.Millisecond)
-	q.Enqueue(task2)
+	_ = q.Enqueue(task2)
 	time.Sleep(1 * time.Millisecond)
-	q.Enqueue(task3)
+	_ = q.Enqueue(task3)
 
 	// Should dequeue in FIFO order
 	t1, _ := q.Dequeue()
@@ -166,7 +166,7 @@ func TestMarkDone(t *testing.T) {
 	q := newTestQueue(100)
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	dequeuedTask, _ := q.Dequeue()
 	err := q.MarkDone(dequeuedTask.ID)
 
@@ -190,7 +190,7 @@ func TestMarkFailed(t *testing.T) {
 	q := newTestQueue(100)
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	dequeuedTask, _ := q.Dequeue()
 	err := q.MarkFailed(dequeuedTask.ID, errors.New("test error"))
 
@@ -217,15 +217,15 @@ func TestIsActive(t *testing.T) {
 	assert.False(t, q.IsActive(task.ID))
 
 	// Active when queued
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	assert.True(t, q.IsActive(task.ID))
 
 	// Active when processing
-	q.Dequeue()
+	_, _ = q.Dequeue()
 	assert.True(t, q.IsActive(task.ID))
 
 	// Not active when done
-	q.MarkDone(task.ID)
+	_ = q.MarkDone(task.ID)
 	assert.False(t, q.IsActive(task.ID))
 }
 
@@ -238,15 +238,15 @@ func TestIsIdle(t *testing.T) {
 	assert.True(t, q.IsIdle())
 
 	// Not idle when queued
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	assert.False(t, q.IsIdle())
 
 	// Not idle when processing
-	q.Dequeue()
+	_, _ = q.Dequeue()
 	assert.False(t, q.IsIdle())
 
 	// Idle when done
-	q.MarkDone(task.ID)
+	_ = q.MarkDone(task.ID)
 	assert.True(t, q.IsIdle())
 }
 
@@ -256,8 +256,8 @@ func TestGetQueuedTasks(t *testing.T) {
 	task1 := NewTask("/media/movie1.mkv", TaskTypeTranscribe)
 	task2 := NewTask("/media/movie2.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task1)
-	q.Enqueue(task2)
+	_ = q.Enqueue(task1)
+	_ = q.Enqueue(task2)
 
 	queued := q.GetQueuedTasks()
 
@@ -272,8 +272,8 @@ func TestGetProcessingTasks(t *testing.T) {
 	task1 := NewTask("/media/movie1.mkv", TaskTypeTranscribe)
 	task2 := NewTask("/media/movie2.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task1)
-	q.Enqueue(task2)
+	_ = q.Enqueue(task1)
+	_ = q.Enqueue(task2)
 	q.Dequeue() // Move task1 to processing
 
 	processing := q.GetProcessingTasks()
@@ -337,9 +337,9 @@ func TestReenqueueAfterDone(t *testing.T) {
 	task1 := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
 	// First attempt
-	q.Enqueue(task1)
+	_ = q.Enqueue(task1)
 	t1, _ := q.Dequeue()
-	q.MarkDone(t1.ID)
+	_ = q.MarkDone(t1.ID)
 
 	// Re-enqueue same file (new task instance)
 	task2 := NewTask("/media/movie.mkv", TaskTypeTranscribe)
@@ -368,9 +368,9 @@ func TestCleanupStaleTasks(t *testing.T) {
 	task2 := NewTask("/media/movie2.mkv", TaskTypeTranscribe)
 	task3 := NewTask("/media/movie3.mkv", TaskTypeTranscribe)
 
-	q.Enqueue(task1)
-	q.Enqueue(task2)
-	q.Enqueue(task3)
+	_ = q.Enqueue(task1)
+	_ = q.Enqueue(task2)
+	_ = q.Enqueue(task3)
 
 	// Dequeue all tasks (move to processing)
 	t1, _ := q.Dequeue()
@@ -399,8 +399,8 @@ func TestCleanupStaleTasks_NoStale(t *testing.T) {
 	q := newTestQueue(100)
 
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
-	q.Enqueue(task)
-	q.Dequeue()
+	_ = q.Enqueue(task)
+	_, _ = q.Dequeue()
 
 	// Task just started, should not be cleaned
 	cleaned := q.CleanupStaleTasks(1 * time.Hour)
@@ -454,13 +454,13 @@ func TestQueue_GetAllProcessingTaskInfo(t *testing.T) {
 	task3 := NewTask("/media/movie3.mkv", TaskTypeDetectLanguage)
 
 	// Enqueue and dequeue all tasks (move to processing)
-	q.Enqueue(task1)
-	q.Enqueue(task2)
-	q.Enqueue(task3)
+	_ = q.Enqueue(task1)
+	_ = q.Enqueue(task2)
+	_ = q.Enqueue(task3)
 
-	q.Dequeue()
-	q.Dequeue()
-	q.Dequeue()
+	_, _ = q.Dequeue()
+	_, _ = q.Dequeue()
+	_, _ = q.Dequeue()
 
 	// Get all processing tasks
 	processingTasks := q.GetAllProcessingTaskInfo()
@@ -478,7 +478,7 @@ func TestQueue_MarkDone_AddsToHistory(t *testing.T) {
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
 	// Queue, dequeue, then mark done
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	dequeued, _ := q.Dequeue()
 	
 	err := q.MarkDone(dequeued.ID)
@@ -497,7 +497,7 @@ func TestQueue_MarkFailed_AddsToHistory(t *testing.T) {
 	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
 
 	// Queue, dequeue, then mark failed
-	q.Enqueue(task)
+	_ = q.Enqueue(task)
 	dequeued, _ := q.Dequeue()
 	
 	err := q.MarkFailed(dequeued.ID, errors.New("test error"))

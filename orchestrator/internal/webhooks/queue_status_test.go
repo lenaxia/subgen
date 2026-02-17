@@ -148,7 +148,8 @@ func TestHandleQueueHistory_Pagination(t *testing.T) {
 	require.NoError(t, err)
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
 
 	tasks := result["tasks"].([]interface{})
 	assert.Len(t, tasks, 5)
@@ -197,7 +198,8 @@ func TestHandleTaskStatus_NotFound(t *testing.T) {
 	assert.Equal(t, http.StatusNotFound, resp.StatusCode)
 
 	var result map[string]interface{}
-	json.NewDecoder(resp.Body).Decode(&result)
+	err = json.NewDecoder(resp.Body).Decode(&result)
+	require.NoError(t, err)
 
 	assert.Equal(t, "error", result["status"])
 	assert.Contains(t, result["error"], "not found")

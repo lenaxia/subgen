@@ -102,9 +102,7 @@ func (s *ExternalScanner) ParseLanguageFromFilename(filename string, videoBaseNa
 
 	// Remove the video base name prefix to get only the subtitle-specific parts
 	// e.g., "movie.eng.srt" with baseName "movie" → ".eng"
-	if strings.HasPrefix(nameWithoutExt, videoBaseName) {
-		nameWithoutExt = strings.TrimPrefix(nameWithoutExt, videoBaseName)
-	}
+	nameWithoutExt = strings.TrimPrefix(nameWithoutExt, videoBaseName)
 
 	// Remove leading dot if present
 	nameWithoutExt = strings.TrimPrefix(nameWithoutExt, ".")
