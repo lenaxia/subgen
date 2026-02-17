@@ -1,0 +1,143 @@
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                    PLEX EPISODE QUEUEING WORKFLOW                         ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+┌─────────────────┐
+│  Plex Server    │
+│  (192.168.5.104)│
+└────────┬────────┘
+         │ Webhook: media.play / library.new
+         │ Payload: { event, Metadata: { ratingKey: "224696" } }
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Orchestrator Webhook Handler                                       │
+│  (internal/webhooks/server.go:239-408)                             │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Validate User-Agent contains "PlexMediaServer"                  │
+│  2. Parse form-encoded payload                                      │
+│  3. Extract ratingKey from Metadata                                 │
+│  4. Create Task with PlexItemID                                     │
+│  5. Enqueue main episode task                                       │
+└────────┬────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Episode Queuer Check (STORY_03)                                    │
+│  Line 364: if episodeQueuer != nil && plexClient != nil             │
+├─────────────────────────────────────────────────────────────────────┤
+│  Check queueing mode:                                               │
+│  • PLEX_QUEUE_NEXT_EPISODE=true  → Queue next episode               │
+│  • PLEX_QUEUE_SEASON=true        → Queue remaining season          │
+│  • PLEX_QUEUE_SERIES=true        → Queue entire series             │
+└────────┬────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Plex API: Get Current Episode Metadata                             │
+│  GET /library/metadata/224696                                       │
+├─────────────────────────────────────────────────────────────────────┤
+│  Response:                                                          │
+│  • title: "Countdown"                                               │
+│  • grandparentTitle: "3 Body Problem"                               │
+│  • index: 1 (episode number)                                        │
+│  • parentIndex: 1 (season number)                                   │
+│  • parentRatingKey: 224687 (season)                                 │
+│  • grandparentRatingKey: 224686 (series)                            │
+└────────┬────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Episode Queuer Logic                                               │
+│  (internal/plex/episode_queue.go)                                   │
+└─────────────────────────────────────────────────────────────────────┘
+         │
+         ├─[NEXT MODE]──────────────────────────────────────────────┐
+         │                                                           │
+         │  queueNextEpisode() - Line 56                           │
+         │  1. GET /library/metadata/224687/children (season)      │
+         │  2. Find episode with index = current + 1               │
+         │  3. If found: return [nextEpisode.ratingKey]            │
+         │  4. If not found:                                        │
+         │     a. GET /library/metadata/224686/children (series)   │
+         │     b. Find season with index = current + 1             │
+         │     c. Return first episode of next season              │
+         │  5. If no next season: return [] (end of series)        │
+         │                                                           │
+         ├─[SEASON MODE]────────────────────────────────────────────┤
+         │                                                           │
+         │  queueSeasonEpisodes() - Line 113                       │
+         │  1. GET /library/metadata/224687/children (season)      │
+         │  2. Filter episodes where index >= current              │
+         │  3. Return all matching ratingKeys                      │
+         │                                                           │
+         ├─[SERIES MODE]────────────────────────────────────────────┤
+         │                                                           │
+         │  queueSeriesEpisodes() - Line 139                       │
+         │  1. GET /library/metadata/224686/children (series)      │
+         │  2. For each season (skip season 0):                    │
+         │     a. GET /library/metadata/{season}/children          │
+         │     b. Filter episodes >= current                       │
+         │  3. Return all matching ratingKeys                      │
+         │                                                           │
+         └───────────────────────┬───────────────────────────────────┘
+                                 │
+                                 │ Returns: ["224697"] (S01E02)
+                                 ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  For Each Additional Episode                                        │
+│  (server.go:377-403)                                               │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. GetFilePath(itemID) → Fetch from Plex API                      │
+│  2. Map path (Plex path → container path)                          │
+│  3. Create Task with mapped path                                    │
+│  4. Enqueue task to queue                                          │
+└────────┬────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Task Queue                                                          │
+│  (internal/queue/)                                                  │
+├─────────────────────────────────────────────────────────────────────┤
+│  Tasks in queue:                                                    │
+│  1. S01E01 "Countdown" (rating_key: 224696)                        │
+│  2. S01E02 "Red Coast" (rating_key: 224697) ← Automatically queued │
+└────────┬────────────────────────────────────────────────────────────┘
+         │
+         ▼
+┌─────────────────────────────────────────────────────────────────────┐
+│  Worker Dispatcher                                                   │
+│  (Processes tasks sequentially)                                     │
+├─────────────────────────────────────────────────────────────────────┤
+│  1. Dequeue task                                                    │
+│  2. Fetch file path from Plex API                                   │
+│  3. Send to worker for transcription                                │
+│  4. Wait for completion                                             │
+│  5. Repeat                                                          │
+└─────────────────────────────────────────────────────────────────────┘
+
+╔═══════════════════════════════════════════════════════════════════════════╗
+║                           TEST RESULTS                                    ║
+╠═══════════════════════════════════════════════════════════════════════════╣
+║                                                                           ║
+║  INPUT:  S01E01 "Countdown" (rating_key: 224696)                         ║
+║  OUTPUT: S01E02 "Red Coast" (rating_key: 224697) ← QUEUED               ║
+║                                                                           ║
+║  ✅ Status: SUCCESS                                                       ║
+║  ✅ Next episode correctly identified                                     ║
+║  ✅ Task successfully enqueued                                           ║
+║  ✅ File path retrieved                                                   ║
+║  ✅ Path mapping applied                                                  ║
+║                                                                           ║
+╚═══════════════════════════════════════════════════════════════════════════╝
+
+KEY CONFIGURATION:
+  PLEX_QUEUE_NEXT_EPISODE=true
+  PLEX_QUEUE_SEASON=false
+  PLEX_QUEUE_SERIES=false
+  PROCESS_MEDIA_ON_PLAY=true
+
+LOGS EVIDENCE:
+  {"msg":"Plex task queued","rating_key":"224696"}
+  {"msg":"Queueing next episode","series":"3 Body Problem","season":1,"episode":2,"title":"Red Coast"}
+  {"msg":"Task enqueued","file_path":".../S01E02 - Red Coast...","task_id":"..."}
+
