@@ -1,8 +1,8 @@
 # EPIC_09: Horizontal Scaling & Multi-Worker Support (Phase 2)
 
 **Status:** Not Started  
-**Estimated Effort:** 24-32 hours  
-**Duration:** 4-5 days  
+**Estimated Effort:** 28-38 hours  
+**Duration:** 5-6 days  
 **Can Parallelize:** ❌ No (depends on EPIC_04)
 
 ---
@@ -127,6 +127,19 @@ func (d *KubernetesDiscovery) GetWorkers(ctx context.Context) ([]Worker, error) 
 - Test Least Loaded with mixed workloads
 - Monitor worker metrics (active jobs)
 - Document load distribution patterns
+
+### [STORY_06: Enhanced Health Checks](./stories/STORY_06_enhanced_health_checks.md)
+**Status:** Not Started  
+**Effort:** 4-6 hours  
+**Priority:** High  
+**Summary:** Comprehensive health checks for Docker and Kubernetes deployments
+
+**Key Tasks:**
+- Add Worker HTTP health server (port 8080)
+- Implement `/health`, `/ready`, `/metrics` endpoints
+- Enhance gRPC health check with new fields
+- Add orchestrator `/healthz`, `/livez`, `/readyz` aliases
+- Test both Docker Compose and K8s modes
 
 ---
 
