@@ -17,10 +17,10 @@ on:
         default: false
 
 env:
-  REGISTRY: docker.io
-  IMAGE_ORCHESTRATOR: lenaxia/subgen-orchestrator
-  IMAGE_WORKER_GPU: lenaxia/subgen-worker
-  IMAGE_WORKER_CPU: lenaxia/subgen-worker
+  REGISTRY: ghcr.io
+  IMAGE_ORCHESTRATOR: ghcr.io/${{ github.repository_owner }}/subgen-orchestrator
+  IMAGE_WORKER_GPU: ghcr.io/${{ github.repository_owner }}/subgen-worker
+  IMAGE_WORKER_CPU: ghcr.io/${{ github.repository_owner }}/subgen-worker
   GO_VERSION: '1.23'
   PYTHON_VERSION: '3.11'
 
@@ -188,11 +188,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push orchestrator image
         uses: docker/build-push-action@v5
@@ -224,11 +225,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push worker GPU image
         uses: docker/build-push-action@v5
@@ -262,11 +264,12 @@ jobs:
       - name: Set up Docker Buildx
         uses: docker/setup-buildx-action@v3
 
-      - name: Login to Docker Hub
+      - name: Login to GitHub Container Registry
         uses: docker/login-action@v3
         with:
-          username: ${{ secrets.DOCKERHUB_USERNAME }}
-          password: ${{ secrets.DOCKERHUB_TOKEN }}
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
 
       - name: Build and push worker CPU image
         uses: docker/build-push-action@v5
@@ -323,20 +326,20 @@ jobs:
 
           **Orchestrator (Go):**
           ```bash
-          docker pull lenaxia/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}
-          docker pull lenaxia/subgen-orchestrator:latest
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-orchestrator:latest
           ```
 
           **Worker - GPU Version (CUDA):**
           ```bash
-          docker pull lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}
-          docker pull lenaxia/subgen-worker:latest
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-worker:${{ needs.prepare.outputs.version_short }}
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-worker:latest
           ```
 
           **Worker - CPU Version:**
           ```bash
-          docker pull lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu
-          docker pull lenaxia/subgen-worker:cpu
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu
+          docker pull ghcr.io/${{ github.repository_owner }}/subgen-worker:cpu
           ```
 
           ### 📦 Binary Downloads
@@ -425,17 +428,17 @@ jobs:
             echo ""
             echo "📦 Docker Images Published:"
             echo "  Orchestrator:"
-            echo "    - lenaxia/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}"
-            echo "    - lenaxia/subgen-orchestrator:latest"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-orchestrator:latest"
             echo ""
             echo "  Worker (GPU):"
-            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}"
-            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-gpu"
-            echo "    - lenaxia/subgen-worker:latest"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-worker:${{ needs.prepare.outputs.version_short }}"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-worker:${{ needs.prepare.outputs.version_short }}-gpu"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-worker:latest"
             echo ""
             echo "  Worker (CPU):"
-            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu"
-            echo "    - lenaxia/subgen-worker:cpu"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu"
+            echo "    - ghcr.io/${{ github.repository_owner }}/subgen-worker:cpu"
             echo ""
             echo "📋 GitHub Release:"
             echo "  - https://github.com/${{ github.repository }}/releases/tag/$VERSION"
