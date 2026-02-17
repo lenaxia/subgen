@@ -198,7 +198,7 @@ jobs:
       - name: Build and push orchestrator image
         uses: docker/build-push-action@v5
         with:
-          context: ./orchestrator
+          context: .
           file: ./orchestrator/Dockerfile
           platforms: linux/amd64,linux/arm64
           push: true
@@ -235,7 +235,7 @@ jobs:
       - name: Build and push worker GPU image
         uses: docker/build-push-action@v5
         with:
-          context: ./worker
+          context: .
           file: ./worker/Dockerfile
           platforms: linux/amd64
           push: true
@@ -274,7 +274,7 @@ jobs:
       - name: Build and push worker CPU image
         uses: docker/build-push-action@v5
         with:
-          context: ./worker
+          context: .
           file: ./worker/Dockerfile.system-av
           platforms: linux/amd64,linux/arm64
           push: true
