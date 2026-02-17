@@ -1,4 +1,11 @@
+# Subgen - Automated Subtitle Generation
+
+[![Orchestrator Tests](https://github.com/lenaxia/subgen/actions/workflows/test-orchestrator.yml/badge.svg)](https://github.com/lenaxia/subgen/actions/workflows/test-orchestrator.yml)
+[![Worker Tests](https://github.com/lenaxia/subgen/actions/workflows/test-worker.yml/badge.svg)](https://github.com/lenaxia/subgen/actions/workflows/test-worker.yml)
+[![E2E Tests](https://github.com/lenaxia/subgen/actions/workflows/test-e2e.yml/badge.svg)](https://github.com/lenaxia/subgen/actions/workflows/test-e2e.yml)
+[![CodeQL](https://github.com/lenaxia/subgen/actions/workflows/codeql.yml/badge.svg)](https://github.com/lenaxia/subgen/actions/workflows/codeql.yml)
 [![Donate](https://img.shields.io/badge/Donate-PayPal-green.svg)](https://www.paypal.com/donate/?hosted_button_id=SU4QQP6LH5PF6)
+
 <img src="https://raw.githubusercontent.com/McCloudS/subgen/main/icon.png" width="200">
 
 <details>
@@ -91,6 +98,31 @@ This potentially has the ability to use CUDA/Nvidia GPU's, but I don't have one 
 
 This will transcribe your personal media on a Plex, Emby, or Jellyfin server to create subtitles (.srt) from audio/video files with the following languages: https://github.com/McCloudS/subgen#audio-languages-supported-via-openai and transcribe or translate them into english. It can also be used as a Whisper provider in Bazarr (See below instructions). It technically has support to transcribe from a foreign langauge to itself (IE Japanese > Japanese, see [TRANSCRIBE_OR_TRANSLATE](https://github.com/McCloudS/subgen#variables)). It is currently reliant on webhooks from Jellyfin, Emby, Plex, or Tautulli. This uses stable-ts and faster-whisper which can use both Nvidia GPUs and CPUs.
 
+## Architecture
+
+Subgen uses a **split architecture** for better scalability and resource management:
+
+- **Orchestrator (Go):** Handles file monitoring, webhooks, queue management, and Plex/Jellyfin/Emby integration
+- **Worker (Python):** Performs Whisper-based transcription using faster-whisper and stable-ts
+
+This separation allows you to:
+- Scale workers independently for high-volume transcription
+- Use different hardware for orchestrator (CPU) and worker (GPU)
+- Restart components independently
+- Better resource isolation
+
+### Docker Images
+
+**Current (Recommended):**
+- `lenaxia/subgen-orchestrator:latest` - Go orchestrator service
+- `lenaxia/subgen-worker:latest` - Python worker with CUDA GPU support
+- `lenaxia/subgen-worker:cpu` - Python worker for CPU-only environments
+
+**Legacy (Deprecated):**
+- `mccloud/subgen:latest` - Monolithic Python-only version (see `legacy/` directory)
+
+> **Migration Note:** If you're using the old monolithic image, see [MIGRATION.md](MIGRATION.md) for upgrade instructions.
+
 # Why?
 
 Honestly, I built this for me, but saw the utility in other people maybe using it.  This works well for my use case.  Since having children, I'm either deaf or wanting to have everything quiet.  We watch EVERYTHING with subtitles now, and I feel like I can't even understand the show without them.  I use Bazarr to auto-download, and gap fill with Plex's built-in capability.  This is for everything else.  Some shows just won't have subtitles available for some reason or another, or in some cases on my H265 media, they are wildly out of sync. 
@@ -121,15 +153,104 @@ Using `-s` for Bazarr setup:
 
 ### Docker
 
-The dockerfile is in the repo along with an example docker-compose file, and is also posted on dockerhub (mccloud/subgen). 
+**Recommended:** Use Docker Compose to run both orchestrator and worker.
 
-If using Subgen without Bazarr, you MUST mount your media volumes in subgen the same way Plex (or your media server) sees them.  For example, if Plex uses "/Share/media/TV:/tv" you must have that identical volume in subgen.  
+#### Docker Compose (Recommended)
 
-`"${APPDATA}/subgen/models:/subgen/models"` is just for storage of the language models.  This isn't necessary, but you will have to redownload the models on any new image pulls if you don't use it.  
+Create a `docker-compose.yml`:
 
-`"${APPDATA}/subgen/subgen.py:/subgen/subgen.py"` If you want to control the version of subgen.py by yourself.  Launcher.py can still be used to download a newer version.
+```yaml
+version: '3.8'
 
-If you want to use a GPU, you need to map it accordingly.  
+services:
+  orchestrator:
+    image: lenaxia/subgen-orchestrator:latest
+    container_name: subgen-orchestrator
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # Webhook and API port
+    environment:
+      - WORKER_ADDRESS=worker:50051
+      - PLEX_SERVER=http://plex:32400
+      - PLEX_TOKEN=your_plex_token_here
+      - JELLYFIN_SERVER=http://jellyfin:8096
+      - JELLYFIN_TOKEN=your_jellyfin_token_here
+      - TRANSCRIBE_FOLDERS=/media/tv|/media/movies
+      - MONITOR=true
+      # Add other environment variables as needed
+    volumes:
+      - /path/to/your/media:/media  # Must match your media server paths
+      - ./config:/config
+    depends_on:
+      - worker
+
+  worker:
+    image: lenaxia/subgen-worker:latest  # For GPU
+    # image: lenaxia/subgen-worker:cpu   # For CPU-only
+    container_name: subgen-worker
+    restart: unless-stopped
+    environment:
+      - TRANSCRIBE_DEVICE=cuda  # or 'cpu'
+      - WHISPER_MODEL=medium
+      - CONCURRENT_TRANSCRIPTIONS=2
+      - COMPUTE_TYPE=auto
+    volumes:
+      - ./models:/models  # Persistent model storage
+    deploy:
+      resources:
+        reservations:
+          devices:
+            - driver: nvidia
+              count: all
+              capabilities: [gpu]
+```
+
+Then run:
+```bash
+docker-compose up -d
+```
+
+#### Individual Containers
+
+**Orchestrator:**
+```bash
+docker run -d \
+  --name subgen-orchestrator \
+  -p 9000:9000 \
+  -e WORKER_ADDRESS=worker:50051 \
+  -e PLEX_SERVER=http://plex:32400 \
+  -e PLEX_TOKEN=your_token \
+  -v /path/to/media:/media \
+  lenaxia/subgen-orchestrator:latest
+```
+
+**Worker (GPU):**
+```bash
+docker run -d \
+  --name subgen-worker \
+  --gpus all \
+  -e TRANSCRIBE_DEVICE=cuda \
+  -e WHISPER_MODEL=medium \
+  -v ./models:/models \
+  lenaxia/subgen-worker:latest
+```
+
+**Worker (CPU):**
+```bash
+docker run -d \
+  --name subgen-worker \
+  -e TRANSCRIBE_DEVICE=cpu \
+  -e WHISPER_MODEL=medium \
+  -v ./models:/models \
+  lenaxia/subgen-worker:cpu
+```
+
+#### Important Notes
+
+- **Path Mapping:** Orchestrator MUST see media files at the same paths as your media server (Plex/Jellyfin/Emby)
+- **Model Storage:** Mount `/models` volume to persist downloaded Whisper models between restarts
+- **Network:** If running orchestrator and worker separately, ensure they can communicate (same Docker network or host networking)
+- **GPU Support:** Requires NVIDIA GPU with CUDA drivers and nvidia-docker2 installed  
 
 #### Unraid
 
@@ -256,10 +377,18 @@ The following environment variables are available in Docker.  They will default 
 | PGID | 100 | GroupID (see: https://docs.linuxserver.io/images/docker-bazarr/#user-group-identifiers) |
 | ASR_TIMEOUT | 18000 | In seconds (defaults to 5 hours), the amount of time to wait before killing an ASR task for not finishing. |
 
-### Images:
-`mccloud/subgen:latest` is GPU or CPU <br>
-`mccloud/subgen:cpu` is for CPU only (slightly smaller image)
-<br><br>
+### Docker Images
+
+**Current Architecture:**
+- `lenaxia/subgen-orchestrator:latest` - Go orchestrator (multi-arch: amd64, arm64)
+- `lenaxia/subgen-worker:latest` - Python worker with CUDA GPU support (amd64 only)
+- `lenaxia/subgen-worker:cpu` - Python worker for CPU (multi-arch: amd64, arm64)
+
+**Legacy (Deprecated):**
+- `mccloud/subgen:latest` - Original monolithic Python image (GPU or CPU)
+- `mccloud/subgen:cpu` - Original CPU-only monolithic image
+
+> Use the current architecture for new deployments. See [MIGRATION.md](MIGRATION.md) if upgrading from legacy.
 
 # What are the limitations/problems?
 

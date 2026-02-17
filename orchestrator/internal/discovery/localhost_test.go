@@ -32,9 +32,13 @@ func TestLocalhostDiscovery_GetWorkers_ConnectionFailure(t *testing.T) {
 
 	workers, err := disc.GetWorkers(ctx)
 
-	assert.Error(t, err)
-	assert.Nil(t, workers)
-	assert.Contains(t, err.Error(), "failed to connect")
+	// Localhost discovery returns unhealthy worker when connection fails (no error)
+	// This allows the pool to track the worker and retry later
+	assert.NoError(t, err, "GetWorkers should not return error for connection failures")
+	assert.NotNil(t, workers, "Should return unhealthy worker")
+	assert.Equal(t, 1, len(workers), "Should return one worker")
+	assert.False(t, workers[0].Healthy, "Worker should be marked as unhealthy")
+	assert.Equal(t, "invalid:99999", workers[0].Address)
 }
 
 // TestLocalhostDiscovery_Watch_NoEvents tests that localhost watch returns closed channel

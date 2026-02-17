@@ -47,18 +47,9 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 		return nil, fmt.Errorf("filePath cannot be empty")
 	}
 
-	// If skip is disabled, never skip
-	if !c.config.SkipIfTargetSubtitleExists {
-		return &CheckResult{
-			ShouldSkip: false,
-			Reason:     ReasonNotApplicable,
-			Details:    "skip checking disabled",
-		}, nil
-	}
-
-	// Check for SRT file (videos)
+	// Check for SRT file (videos) - only if target subtitle check is enabled
 	srtPath := getSubtitlePath(filePath, ".srt")
-	if exists(srtPath) {
+	if c.config.SkipIfTargetSubtitleExists && exists(srtPath) {
 		return &CheckResult{
 			ShouldSkip: true,
 			Reason:     ReasonSubtitleExists,
@@ -66,8 +57,8 @@ func (c *BasicChecker) Check(ctx context.Context, filePath string) (*CheckResult
 		}, nil
 	}
 
-	// Check for LRC file (audio files)
-	if isAudioFile(filePath) {
+	// Check for LRC file (audio files) - only if target subtitle check is enabled
+	if c.config.SkipIfTargetSubtitleExists && isAudioFile(filePath) {
 		lrcPath := getSubtitlePath(filePath, ".lrc")
 		if exists(lrcPath) {
 			return &CheckResult{

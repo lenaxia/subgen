@@ -7,6 +7,7 @@ import (
 	"net"
 	"os"
 	"os/signal"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"syscall"
@@ -20,6 +21,7 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/mccloud/subgen/orchestrator/internal/observability"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
+	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/mccloud/subgen/orchestrator/internal/webhooks"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -295,8 +297,44 @@ func main() {
 			StabilityTimeout: time.Duration(cfg.Monitor.StabilityTimeout) * time.Second,
 		}
 
-		// Create callback for file watcher
+		// Create skip checker FIRST (before file watcher callback needs it)
+		queueAdapter := &QueueAdapter{queue: taskQueue}
+
+		// Convert config.SkipConfig to skip.Config
+		skipConfig := &skip.Config{
+			SkipIfTargetSubtitleExists:      cfg.Skip.IfTargetSubtitlesExist,
+			CheckEmbeddedSubtitles:          true, // Default to true
+			SkipIfInternalSubtitlesLanguage: cfg.Skip.IfInternalSubtitlesLang,
+			SkipIfExternalSubtitlesExist:    cfg.Skip.IfExternalSubtitlesExist,
+			SkipOnlySubgenSubtitles:         cfg.Skip.OnlySubgenSubtitles,
+			SkipSubtitleLanguages:           cfg.Skip.SubtitleLanguages,
+			SkipIfAudioLanguages:            cfg.Skip.AudioLanguages,
+			PreferredAudioLanguages:         cfg.Skip.PreferredAudioLanguages,
+			LimitToPreferredAudioLanguage:   cfg.Skip.LimitToPreferredAudioLanguage,
+		}
+
+		skipChecker, err := skip.NewBasicChecker(skipConfig)
+		if err != nil {
+			log.WithError(err).Fatal("Failed to create skip checker")
+		}
+		scanner := monitor.NewScannerWithLogger(queueAdapter, skipChecker, log)
+		webhookServer.SetScanner(scanner)
+
+		// Create callback for file watcher (NOW has access to skipChecker)
 		fileCallback := func(filePath string) {
+			// Check skip logic first
+			result, checkErr := skipChecker.Check(ctx, filePath)
+			if checkErr != nil {
+				log.WithError(checkErr).Warnf("Skip check failed for %s, will process anyway", filePath)
+			} else if result != nil && result.ShouldSkip {
+				log.WithFields(logrus.Fields{
+					"file":    filePath,
+					"reason":  result.Reason,
+					"details": result.Details,
+				}).Info("Skipping monitored file (skip logic)")
+				return
+			}
+
 			// Create transcription task
 			task := queue.NewTask(filePath, queue.TaskTypeTranscribe)
 
@@ -321,10 +359,6 @@ func main() {
 		// Perform startup scan if enabled
 		if cfg.Monitor.ScanOnStartup {
 			log.Info("Performing startup scan...")
-
-			// Create queue adapter for scanner
-			queueAdapter := &QueueAdapter{queue: taskQueue}
-			scanner := monitor.NewScannerWithLogger(queueAdapter, nil, log)
 
 			for _, folder := range cfg.Monitor.TranscribeFolders {
 				result, err := scanner.ScanDirectory(folder, true, cfg.Transcription.SubtitleLanguageName)
@@ -551,6 +585,36 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		}).Info("Fetched file path from Jellyfin")
 	}
 
+	// Handle ASR tasks with AudioContent: save to temp file in shared /media directory
+	var tempFilePath string
+	if len(task.AudioContent) > 0 && task.FilePath == "" {
+		tmpFile, err := os.CreateTemp("/media", "asr-*.tmp")
+		if err != nil {
+			td.log.WithError(err).Error("Failed to create temp file for ASR audio")
+			sendResult(&queue.TranscriptionResult{
+				Error: fmt.Errorf("failed to create temp file: %w", err),
+			})
+			return
+		}
+		tempFilePath = tmpFile.Name()
+		defer os.Remove(tempFilePath) // Clean up after transcription
+
+		// Write audio content to temp file
+		if _, err := tmpFile.Write(task.AudioContent); err != nil {
+			tmpFile.Close()
+			td.log.WithError(err).Error("Failed to write ASR audio to temp file")
+			sendResult(&queue.TranscriptionResult{
+				Error: fmt.Errorf("failed to write audio content: %w", err),
+			})
+			return
+		}
+		tmpFile.Close()
+
+		// Use temp file path for transcription
+		task.FilePath = tempFilePath
+		td.log.WithField("temp_file", tempFilePath).Debug("Created temp file for ASR audio")
+	}
+
 	// Select a worker
 	worker, err := td.workerPool.SelectWorker()
 	if err != nil {
@@ -584,12 +648,23 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		"detected_language": resp.DetectedLanguage,
 	}).Info("Transcription completed successfully")
 
+	// Parse segments from generated subtitle file if result channel is present
+	var segments []queue.Segment
+	if task.ResultChan != nil && resp.SubtitlePath != "" {
+		// Read the subtitle file and parse segments
+		parsedSegments, parseErr := td.parseSubtitleFile(resp.SubtitlePath)
+		if parseErr != nil {
+			td.log.WithError(parseErr).Warn("Failed to parse subtitle file for result channel")
+			// Continue with empty segments rather than failing
+		} else {
+			segments = parsedSegments
+			td.log.WithField("segment_count", len(segments)).Debug("Parsed segments from subtitle file")
+		}
+	}
+
 	// Send result to result channel if present
-	// NOTE: Currently we don't have segments in the gRPC response
-	// For STORY_05, we'll need to enhance the gRPC protocol to return segments
-	// For now, we return success with metadata only
 	sendResult(&queue.TranscriptionResult{
-		Segments: []queue.Segment{}, // TODO: Populate from worker response in future
+		Segments: segments,
 		Metadata: queue.Metadata{
 			Language: resp.DetectedLanguage,
 			Duration: float64(resp.Stats.GetDurationSeconds()),
@@ -610,6 +685,170 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 			td.log.WithError(err).Warn("Failed to refresh Jellyfin metadata")
 		}
 	}
+}
+
+// parseSubtitleFile reads a subtitle file and parses it into segments
+func (td *TaskDispatcher) parseSubtitleFile(filePath string) ([]queue.Segment, error) {
+	// Read file content
+	content, err := os.ReadFile(filePath)
+	if err != nil {
+		return nil, fmt.Errorf("failed to read subtitle file: %w", err)
+	}
+
+	// Determine format from file extension
+	ext := strings.ToLower(filepath.Ext(filePath))
+	format := strings.TrimPrefix(ext, ".")
+
+	// Parse based on format
+	switch format {
+	case "srt":
+		return td.parseSRT(string(content))
+	case "lrc":
+		return td.parseLRC(string(content))
+	case "vtt":
+		return td.parseVTT(string(content))
+	default:
+		return nil, fmt.Errorf("unsupported subtitle format: %s", format)
+	}
+}
+
+// parseSRT parses SRT format into segments
+func (td *TaskDispatcher) parseSRT(content string) ([]queue.Segment, error) {
+	var segments []queue.Segment
+	lines := strings.Split(content, "\n")
+
+	var currentSeg queue.Segment
+	var inText bool
+
+	for _, line := range lines {
+		line = strings.TrimSpace(line)
+
+		// Skip empty lines and sequence numbers
+		if line == "" {
+			inText = false
+			if currentSeg.Text != "" {
+				segments = append(segments, currentSeg)
+				currentSeg = queue.Segment{}
+			}
+			continue
+		}
+
+		// Check if this is a timestamp line
+		if strings.Contains(line, "-->") {
+			parts := strings.Split(line, "-->")
+			if len(parts) == 2 {
+				currentSeg.Start = td.parseTimestamp(strings.TrimSpace(parts[0]))
+				currentSeg.End = td.parseTimestamp(strings.TrimSpace(parts[1]))
+				inText = true
+			}
+			continue
+		}
+
+		// If we're after a timestamp, this is text
+		if inText {
+			if currentSeg.Text != "" {
+				currentSeg.Text += " "
+			}
+			currentSeg.Text += line
+		}
+	}
+
+	// Add final segment if exists
+	if currentSeg.Text != "" {
+		segments = append(segments, currentSeg)
+	}
+
+	return segments, nil
+}
+
+// parseLRC parses LRC format into segments
+func (td *TaskDispatcher) parseLRC(content string) ([]queue.Segment, error) {
+	var segments []queue.Segment
+	lines := strings.Split(content, "\n")
+
+	for i, line := range lines {
+		line = strings.TrimSpace(line)
+		if line == "" || !strings.HasPrefix(line, "[") {
+			continue
+		}
+
+		// Parse [mm:ss.xx]Text format
+		endBracket := strings.Index(line, "]")
+		if endBracket == -1 {
+			continue
+		}
+
+		timestamp := line[1:endBracket]
+		text := strings.TrimSpace(line[endBracket+1:])
+
+		start := td.parseLRCTimestamp(timestamp)
+
+		// Calculate end time (next segment's start, or add 3 seconds for last)
+		end := start + 3.0
+		if i+1 < len(lines) {
+			nextLine := strings.TrimSpace(lines[i+1])
+			if strings.HasPrefix(nextLine, "[") {
+				nextEnd := strings.Index(nextLine, "]")
+				if nextEnd != -1 {
+					nextTimestamp := nextLine[1:nextEnd]
+					end = td.parseLRCTimestamp(nextTimestamp)
+				}
+			}
+		}
+
+		segments = append(segments, queue.Segment{
+			Start: start,
+			End:   end,
+			Text:  text,
+		})
+	}
+
+	return segments, nil
+}
+
+// parseVTT parses WebVTT format into segments
+func (td *TaskDispatcher) parseVTT(content string) ([]queue.Segment, error) {
+	// VTT is similar to SRT but with WEBVTT header
+	content = strings.TrimPrefix(content, "WEBVTT")
+	content = strings.TrimSpace(content)
+	return td.parseSRT(content) // Reuse SRT parser
+}
+
+// parseTimestamp converts SRT timestamp (00:00:10,500) to seconds
+func (td *TaskDispatcher) parseTimestamp(ts string) float64 {
+	// Format: HH:MM:SS,mmm or HH:MM:SS.mmm
+	ts = strings.Replace(ts, ",", ".", 1)
+
+	parts := strings.Split(ts, ":")
+	if len(parts) != 3 {
+		return 0
+	}
+
+	hours := parseFloat(parts[0])
+	minutes := parseFloat(parts[1])
+	seconds := parseFloat(parts[2])
+
+	return hours*3600 + minutes*60 + seconds
+}
+
+// parseLRCTimestamp converts LRC timestamp (mm:ss.xx) to seconds
+func (td *TaskDispatcher) parseLRCTimestamp(ts string) float64 {
+	parts := strings.Split(ts, ":")
+	if len(parts) != 2 {
+		return 0
+	}
+
+	minutes := parseFloat(parts[0])
+	seconds := parseFloat(parts[1])
+
+	return minutes*60 + seconds
+}
+
+// parseFloat is a helper to parse float from string
+func parseFloat(s string) float64 {
+	var f float64
+	fmt.Sscanf(s, "%f", &f)
+	return f
 }
 
 // CheckHealth performs a health check on the orchestrator

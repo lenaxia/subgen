@@ -50,9 +50,24 @@ func NewPool(discovery WorkerDiscovery, strategy LoadBalanceStrategy, log *logru
 
 // Start begins worker discovery and health checking
 func (p *Pool) Start(ctx context.Context) error {
-	// Initial discovery
+	// Initial discovery - don't fail if workers aren't ready yet
 	if err := p.Refresh(ctx); err != nil {
-		return err
+		p.log.WithError(err).Warn("Initial worker discovery failed, will retry in background")
+	}
+
+	// Log worker status
+	p.mu.RLock()
+	healthyCount := len(p.filterHealthy())
+	totalCount := len(p.workers)
+	p.mu.RUnlock()
+
+	if healthyCount == 0 {
+		p.log.Warn("No healthy workers available at startup, will continue checking")
+	} else {
+		p.log.WithFields(logrus.Fields{
+			"healthy": healthyCount,
+			"total":   totalCount,
+		}).Info("Worker pool started with healthy workers")
 	}
 
 	// Start health check loop

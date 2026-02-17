@@ -51,6 +51,10 @@ func (a *QueueAdapter) Enqueue(task Task) error {
 	// Set result channel for blocking operations (STORY_10)
 	queueTask.ResultChan = task.ResultChan
 
+	// Recompute task ID now that all identifying fields are set
+	// This ensures Plex/Jellyfin tasks with different IDs get unique task IDs
+	queueTask.ID = queueTask.ComputeID()
+
 	// Enqueue the task
 	return a.queue.Enqueue(queueTask)
 }

@@ -2,7 +2,6 @@ package discovery
 
 import (
 	"context"
-	"fmt"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -26,17 +25,33 @@ func NewLocalhostDiscovery(address string, log *logrus.Logger) *LocalhostDiscove
 
 // GetWorkers returns the single localhost worker (if healthy)
 func (d *LocalhostDiscovery) GetWorkers(ctx context.Context) ([]Worker, error) {
-	conn, err := grpc.DialContext(ctx, d.address,
+	// Create a timeout context for connection attempt (5 seconds)
+	connCtx, cancel := context.WithTimeout(ctx, 5*time.Second)
+	defer cancel()
+
+	// Try to connect to worker with timeout
+	conn, err := grpc.DialContext(connCtx, d.address,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithBlock(),
 	)
 	if err != nil {
-		return nil, fmt.Errorf("failed to connect to localhost worker: %w", err)
+		// Log warning but don't fail - worker might not be ready yet
+		d.log.WithError(err).WithField("address", d.address).Warn("Failed to connect to localhost worker, will retry later")
+
+		// Return unhealthy worker so pool can track it
+		worker := Worker{
+			ID:       "worker-local",
+			Address:  d.address,
+			Healthy:  false, // Mark as unhealthy
+			Active:   0,
+			LastSeen: time.Now(),
+		}
+		return []Worker{worker}, nil
 	}
 	defer conn.Close()
 
 	// TODO: Implement health check using protobuf-generated client
-	// For now, return mock worker for compilation
+	// For now, assume healthy if connection succeeded
 	worker := Worker{
 		ID:       "worker-local",
 		Address:  d.address,
@@ -49,7 +64,7 @@ func (d *LocalhostDiscovery) GetWorkers(ctx context.Context) ([]Worker, error) {
 		"address": worker.Address,
 		"healthy": worker.Healthy,
 		"active":  worker.Active,
-	}).Debug("Localhost worker discovered")
+	}).Info("Localhost worker discovered and healthy")
 
 	return []Worker{worker}, nil
 }

@@ -1,48 +1,115 @@
+version: '3.8'
+
 services:
-   subgen:
-      container_name: subgen
-      tty: true
-      image: mccloud/subgen
-      environment:
-         - "WHISPER_MODEL=medium"
-         - "WHISPER_THREADS=4"
-         - "PROCADDEDMEDIA=True"
-         - "PROCMEDIAONPLAY=False"
-         - "NAMESUBLANG=aa"
-         - "SKIPIFINTERNALSUBLANG=eng"
-         - "PLEXTOKEN=plextoken"
-         - "PLEXSERVER=http://plexserver:32400"
-         - "JELLYFINTOKEN=token here"
-         - "JELLYFINSERVER=http://jellyfin:8096"
-         - "WEBHOOKPORT=9000"
-         - "CONCURRENT_TRANSCRIPTIONS=2"
-         - "WORD_LEVEL_HIGHLIGHT=False"
-         - "DEBUG=True"
-         - "USE_PATH_MAPPING=False"
-         - "PATH_MAPPING_FROM=/tv"
-         - "PATH_MAPPING_TO=/Volumes/TV"
-         - "TRANSCRIBE_DEVICE=cpu"
-         - "CLEAR_VRAM_ON_COMPLETE=True"
-         - "MODEL_PATH=./models"
-         - "UPDATE=False"
-         - "APPEND=False"
-         - "USE_MODEL_PROMPT=False"
-         - "CUSTOM_MODEL_PROMPT="
-         - "LRC_FOR_AUDIO_FILES=True"
-         - "CUSTOM_REGROUP=cm_sl=84_sl=42++++++1"
-      volumes:
-         - "${TV}:/tv"
-         - "${MOVIES}:/movies"
-         - "${APPDATA}/subgen/models:/subgen/models"
-      ports:
-         - "9000:9000"
-      # # ⚠️ FOR GPU IMAGE ⚠️
-      # # uncomment folllowing lines to pass nvidia gpu to the container
-      # deploy:
-      #    resources:
-      #       reservations:
-      #          devices:
-      #             - driver: nvidia
-      #               count: 1
-      #               capabilities:
-      #                  - gpu
+  orchestrator:
+    image: lenaxia/subgen-orchestrator:latest
+    container_name: subgen-orchestrator
+    restart: unless-stopped
+    ports:
+      - "9000:9000"  # Webhook and API port
+    environment:
+      # Worker Connection (Required)
+      - WORKER_ADDRESS=worker:50051
+      
+      # Media Server Configuration
+      - PLEX_SERVER=http://plexserver:32400
+      - PLEX_TOKEN=your_plex_token_here
+      - JELLYFIN_SERVER=http://jellyfin:8096
+      - JELLYFIN_TOKEN=your_jellyfin_token_here
+      
+      # Processing Settings
+      - PROCESS_ADDED_MEDIA=true
+      - PROCESS_MEDIA_ON_PLAY=false
+      - SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE=eng
+      
+      # Path Mapping
+      - USE_PATH_MAPPING=false
+      - PATH_MAPPING_FROM=/tv
+      - PATH_MAPPING_TO=/Volumes/TV
+      
+      # File Monitoring (Optional)
+      - TRANSCRIBE_FOLDERS=  # e.g., /tv|/movies
+      - MONITOR=false
+      
+      # Subtitle Configuration
+      - SUBTITLE_LANGUAGE_NAME=aa
+      - WORD_LEVEL_HIGHLIGHT=false
+      
+      # Debug
+      - DEBUG=true
+      - WEBHOOK_PORT=9000
+    volumes:
+      - "${TV}:/tv"
+      - "${MOVIES}:/movies"
+      - ./config:/config
+    depends_on:
+      - worker
+    networks:
+      - subgen
+
+  worker:
+    image: lenaxia/subgen-worker:latest  # For GPU
+    # image: lenaxia/subgen-worker:cpu   # For CPU-only
+    container_name: subgen-worker
+    restart: unless-stopped
+    environment:
+      # Transcription Settings
+      - TRANSCRIBE_DEVICE=cpu  # Change to 'cuda' for GPU
+      - WHISPER_MODEL=medium
+      - CONCURRENT_TRANSCRIPTIONS=2
+      - WHISPER_THREADS=4
+      - COMPUTE_TYPE=auto
+      
+      # Model Storage
+      - MODEL_PATH=/models
+      
+      # Memory Management
+      - CLEAR_VRAM_ON_COMPLETE=true
+      - MODEL_CLEANUP_DELAY=30
+      
+      # Subtitle Formatting
+      - LRC_FOR_AUDIO_FILES=true
+      - CUSTOM_REGROUP=cm_sl=84_sl=42++++++1
+      - USE_MODEL_PROMPT=false
+      - CUSTOM_MODEL_PROMPT=
+    volumes:
+      - "${TV}:/tv"
+      - "${MOVIES}:/movies"
+      - "${APPDATA}/subgen/models:/models"  # Persistent model storage
+    networks:
+      - subgen
+    # Uncomment below for GPU support
+    # deploy:
+    #   resources:
+    #     reservations:
+    #       devices:
+    #         - driver: nvidia
+    #           count: 1
+    #           capabilities: [gpu]
+
+networks:
+  subgen:
+    driver: bridge
+
+# ==========================================
+# LEGACY CONFIGURATION (Deprecated)
+# ==========================================
+# For the old monolithic image, use:
+#
+# services:
+#   subgen:
+#     image: mccloud/subgen:latest
+#     container_name: subgen
+#     ports:
+#       - "9000:9000"
+#     environment:
+#       - WHISPER_MODEL=medium
+#       - TRANSCRIBE_DEVICE=cpu
+#       # ... other variables
+#     volumes:
+#       - "${TV}:/tv"
+#       - "${MOVIES}:/movies"
+#       - "${APPDATA}/subgen/models:/subgen/models"
+#
+# See legacy/README.md for details
+

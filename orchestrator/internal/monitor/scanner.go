@@ -149,6 +149,9 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 			checkResult, err := s.skipChecker.Check(ctx, path)
 			if err != nil {
 				// Log error but continue processing other files
+				if s.log != nil {
+					s.log.WithError(err).WithField("file_path", path).Error("Skip check failed")
+				}
 				return nil
 			}
 
@@ -157,6 +160,13 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 				// Track skip reason
 				reasonKey := string(checkResult.Reason)
 				result.SkipReasons[reasonKey]++
+				if s.log != nil {
+					s.log.WithFields(map[string]interface{}{
+						"file_path": path,
+						"reason":    checkResult.Reason,
+						"details":   checkResult.Details,
+					}).Debug("File skipped")
+				}
 				return nil
 			}
 		}

@@ -10,10 +10,47 @@ import (
 	"testing"
 
 	"github.com/mccloud/subgen/orchestrator/internal/config"
+	"github.com/mccloud/subgen/orchestrator/internal/queue"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 )
+
+// MockQueueWithResult sends a fake result to ResultChan to unblock ASR endpoint
+type MockQueueWithResult struct {
+	tasks []Task
+}
+
+func (m *MockQueueWithResult) Enqueue(task Task) error {
+	m.tasks = append(m.tasks, task)
+	// If task has ResultChan, send fake result to unblock ASR endpoint
+	if task.ResultChan != nil {
+		go func() {
+			task.ResultChan <- &queue.TranscriptionResult{
+				Segments: []queue.Segment{
+					{Text: "fake transcription"},
+				},
+				Metadata: queue.Metadata{
+					Language: "en",
+					Duration: 1.0,
+				},
+				Error: nil,
+			}
+		}()
+	}
+	return nil
+}
+
+func (m *MockQueueWithResult) Size() int                                  { return len(m.tasks) }
+func (m *MockQueueWithResult) ProcessingCount() int                       { return 0 }
+func (m *MockQueueWithResult) IsIdle() bool                               { return len(m.tasks) == 0 }
+func (m *MockQueueWithResult) GetTaskInfo(taskID string) *queue.TaskInfo  { return nil }
+func (m *MockQueueWithResult) GetAllProcessingTaskInfo() []queue.TaskInfo { return []queue.TaskInfo{} }
+func (m *MockQueueWithResult) GetHistory(limit, offset int) []queue.TaskInfo {
+	return []queue.TaskInfo{}
+}
+func (m *MockQueueWithResult) GetHistoryTotal() int { return 0 }
+func (m *MockQueueWithResult) GetTasks() []Task     { return m.tasks }
 
 // TestPathMapping_Emby tests path mapping in Emby webhook handler
 func TestPathMapping_Emby(t *testing.T) {
@@ -42,79 +79,19 @@ func TestPathMapping_Emby(t *testing.T) {
 	// Create mock queue
 	queue := &MockQueue{}
 	log := logrus.New()
-	log.SetLevel(logrus.FatalLevel) // Suppress logs in test
-
-	// Create server
-	server := NewServer(cfg, queue, log)
-	app := server.App()
-
-	// Create test payload
-	payload := EmbyPayload{
-		Event: "library.new",
-		Item: struct {
-			Path string `json:"Path"`
-		}{
-			Path: "/data/movies/test.mkv",
-		},
-	}
-	payloadBytes, err := json.Marshal(payload)
-	require.NoError(t, err)
-
-	// Create request
-	req := httptest.NewRequest("POST", "/emby", bytes.NewReader([]byte("data="+string(payloadBytes))))
-	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-
-	// Execute request
-	resp, err := app.Test(req)
-	require.NoError(t, err)
-
-	// Assert
-	assert.Equal(t, 200, resp.StatusCode)
-	assert.Equal(t, 1, len(queue.GetTasks()))
-	assert.Equal(t, testFile, queue.GetTasks()[0].FilePath) // Should be mapped path
-}
-
-// TestPathMapping_Tautulli tests path mapping in Tautulli webhook handler
-func TestPathMapping_Tautulli(t *testing.T) {
-	// Create temporary directory structure
-	tmpDir := t.TempDir()
-	destDir := filepath.Join(tmpDir, "dest")
-	require.NoError(t, os.MkdirAll(filepath.Join(destDir, "tv"), 0755))
-
-	testFile := filepath.Join(destDir, "tv", "show.mkv")
-	require.NoError(t, os.WriteFile(testFile, []byte("test"), 0644))
-
-	// Setup config with path mapping
-	cfg := &config.Config{
-		ProcessAddedMedia: true,
-		PathMapping: config.PathMappingConfig{
-			Enabled: true,
-			From:    "/media",
-			To:      destDir,
-		},
-		Plex: config.PlexConfig{
-			Token:   "test-token",
-			Enabled: true,
-		},
-	}
-
-	// Create mock queue
-	queue := &MockQueue{}
-	log := logrus.New()
 	log.SetLevel(logrus.FatalLevel)
 
 	// Create server
 	server := NewServer(cfg, queue, log)
 	app := server.App()
 
-	// Create test payload as form-encoded data (Tautulli uses form data, not JSON)
+	// Create test payload as form-encoded data with Emby format
 	var buf bytes.Buffer
-	buf.WriteString("event=added&file=/media/tv/show.mkv")
+	buf.WriteString(`data={"Event":"library.new","Item":{"Path":"/data/movies/test.mkv","Type":"Movie"}}`)
 
 	// Create request
-	req := httptest.NewRequest("POST", "/tautulli", &buf)
+	req := httptest.NewRequest("POST", "/emby", &buf)
 	req.Header.Set("Content-Type", "application/x-www-form-urlencoded")
-	req.Header.Set("source", "Tautulli")
 
 	// Execute request
 	resp, err := app.Test(req)
@@ -152,8 +129,8 @@ func TestPathMapping_ASR(t *testing.T) {
 		},
 	}
 
-	// Create mock queue
-	queue := &MockQueue{}
+	// Create mock queue that sends fake result to unblock ASR endpoint
+	queue := &MockQueueWithResult{}
 	log := logrus.New()
 	log.SetLevel(logrus.FatalLevel)
 

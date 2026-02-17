@@ -1,0 +1,441 @@
+name: Release
+
+on:
+  push:
+    tags:
+      - 'v*'  # Trigger on version tags like v1.0.0, v2024.02.1
+  workflow_dispatch:
+    inputs:
+      version:
+        description: 'Version to release (e.g., v1.0.0)'
+        required: true
+        type: string
+      skip_tests:
+        description: 'Skip tests (not recommended)'
+        required: false
+        type: boolean
+        default: false
+
+env:
+  REGISTRY: docker.io
+  IMAGE_ORCHESTRATOR: lenaxia/subgen-orchestrator
+  IMAGE_WORKER_GPU: lenaxia/subgen-worker
+  IMAGE_WORKER_CPU: lenaxia/subgen-worker
+  GO_VERSION: '1.25'
+  PYTHON_VERSION: '3.11'
+
+jobs:
+  # Extract version from tag or input
+  prepare:
+    name: Prepare Release
+    runs-on: ubuntu-latest
+    outputs:
+      version: ${{ steps.get_version.outputs.version }}
+      version_short: ${{ steps.get_version.outputs.version_short }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Get version
+        id: get_version
+        run: |
+          if [ "${{ github.event_name }}" = "workflow_dispatch" ]; then
+            VERSION="${{ github.event.inputs.version }}"
+          else
+            VERSION=${GITHUB_REF#refs/tags/}
+          fi
+          VERSION_SHORT=${VERSION#v}  # Remove 'v' prefix
+          echo "version=$VERSION" >> $GITHUB_OUTPUT
+          echo "version_short=$VERSION_SHORT" >> $GITHUB_OUTPUT
+          echo "Release version: $VERSION"
+          echo "Short version: $VERSION_SHORT"
+
+  # Run all tests before release
+  test-orchestrator:
+    name: Test Go Orchestrator
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests }}
+    needs: prepare
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Install FFmpeg
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg ffprobe
+
+      - name: Run all orchestrator tests
+        working-directory: ./orchestrator
+        run: |
+          go mod download
+          go test -v -race -timeout 10m ./...
+
+  test-worker:
+    name: Test Python Worker
+    runs-on: ubuntu-latest
+    if: ${{ !inputs.skip_tests }}
+    needs: prepare
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Python
+        uses: actions/setup-python@v5
+        with:
+          python-version: ${{ env.PYTHON_VERSION }}
+          cache: 'pip'
+          cache-dependency-path: worker/requirements.txt
+
+      - name: Install system dependencies
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg ffprobe
+
+      - name: Install Python dependencies
+        working-directory: ./worker
+        run: |
+          python -m pip install --upgrade pip
+          pip install -r requirements.txt
+          pip install pytest pytest-cov pytest-asyncio pytest-mock
+
+      - name: Run worker tests
+        working-directory: ./worker
+        run: pytest tests/ -v --cov=src
+
+  # Build Go orchestrator binaries for multiple platforms
+  build-binaries:
+    name: Build Binaries
+    runs-on: ubuntu-latest
+    needs: [prepare, test-orchestrator, test-worker]
+    if: ${{ always() && (needs.test-orchestrator.result == 'success' || needs.test-orchestrator.result == 'skipped') && (needs.test-worker.result == 'success' || needs.test-worker.result == 'skipped') }}
+    strategy:
+      matrix:
+        include:
+          - goos: linux
+            goarch: amd64
+          - goos: linux
+            goarch: arm64
+          - goos: darwin
+            goarch: amd64
+          - goos: darwin
+            goarch: arm64
+          - goos: windows
+            goarch: amd64
+
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Setup Go
+        uses: actions/setup-go@v5
+        with:
+          go-version: ${{ env.GO_VERSION }}
+          cache-dependency-path: orchestrator/go.sum
+
+      - name: Build binary
+        working-directory: ./orchestrator
+        env:
+          GOOS: ${{ matrix.goos }}
+          GOARCH: ${{ matrix.goarch }}
+          CGO_ENABLED: 0
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+          BUILD_TIME=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+          GIT_COMMIT=${{ github.sha }}
+
+          OUTPUT_NAME="orchestrator-${{ matrix.goos }}-${{ matrix.goarch }}"
+          if [ "${{ matrix.goos }}" = "windows" ]; then
+            OUTPUT_NAME="${OUTPUT_NAME}.exe"
+          fi
+
+          go build -v \
+            -ldflags "-w -s -X main.Version=${VERSION} -X main.BuildTime=${BUILD_TIME} -X main.GitCommit=${GIT_COMMIT}" \
+            -o "bin/${OUTPUT_NAME}" \
+            ./cmd/orchestrator
+
+          echo "Built: bin/${OUTPUT_NAME}"
+          ls -lh bin/${OUTPUT_NAME}
+
+      - name: Upload binary artifact
+        uses: actions/upload-artifact@v4
+        with:
+          name: orchestrator-${{ matrix.goos }}-${{ matrix.goarch }}
+          path: orchestrator/bin/orchestrator-*
+
+  # Build and push orchestrator Docker image
+  build-docker-orchestrator:
+    name: Build Orchestrator Docker Image
+    runs-on: ubuntu-latest
+    needs: [prepare, test-orchestrator, test-worker]
+    if: ${{ always() && (needs.test-orchestrator.result == 'success' || needs.test-orchestrator.result == 'skipped') && (needs.test-worker.result == 'success' || needs.test-worker.result == 'skipped') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push orchestrator image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./orchestrator
+          file: ./orchestrator/Dockerfile
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_ORCHESTRATOR }}:latest
+            ${{ env.IMAGE_ORCHESTRATOR }}:${{ needs.prepare.outputs.version_short }}
+            ${{ env.IMAGE_ORCHESTRATOR }}:${{ needs.prepare.outputs.version }}
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push worker GPU Docker image
+  build-docker-worker-gpu:
+    name: Build Worker GPU Docker Image
+    runs-on: ubuntu-latest
+    needs: [prepare, test-orchestrator, test-worker]
+    if: ${{ always() && (needs.test-orchestrator.result == 'success' || needs.test-orchestrator.result == 'skipped') && (needs.test-worker.result == 'success' || needs.test-worker.result == 'skipped') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push worker GPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          file: ./worker/Dockerfile
+          platforms: linux/amd64
+          push: true
+          tags: |
+            ${{ env.IMAGE_WORKER_GPU }}:latest
+            ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version_short }}
+            ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version }}
+            ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version_short }}-cuda
+            ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version }}-cuda
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Build and push worker CPU Docker image
+  build-docker-worker-cpu:
+    name: Build Worker CPU Docker Image
+    runs-on: ubuntu-latest
+    needs: [prepare, test-orchestrator, test-worker]
+    if: ${{ always() && (needs.test-orchestrator.result == 'success' || needs.test-orchestrator.result == 'skipped') && (needs.test-worker.result == 'success' || needs.test-worker.result == 'skipped') }}
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Set up QEMU
+        uses: docker/setup-qemu-action@v3
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@v3
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@v3
+        with:
+          username: ${{ secrets.DOCKERHUB_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_TOKEN }}
+
+      - name: Build and push worker CPU image
+        uses: docker/build-push-action@v5
+        with:
+          context: ./worker
+          file: ./worker/Dockerfile.system-av
+          platforms: linux/amd64,linux/arm64
+          push: true
+          tags: |
+            ${{ env.IMAGE_WORKER_CPU }}:cpu
+            ${{ env.IMAGE_WORKER_CPU }}:${{ needs.prepare.outputs.version_short }}-cpu
+            ${{ env.IMAGE_WORKER_CPU }}:${{ needs.prepare.outputs.version }}-cpu
+          cache-from: type=gha
+          cache-to: type=gha,mode=max
+
+  # Create GitHub Release with release notes
+  create-release:
+    name: Create GitHub Release
+    runs-on: ubuntu-latest
+    needs: [prepare, build-binaries, build-docker-orchestrator, build-docker-worker-gpu, build-docker-worker-cpu]
+    permissions:
+      contents: write
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+        with:
+          fetch-depth: 0
+
+      - name: Download all binary artifacts
+        uses: actions/download-artifact@v4
+        with:
+          path: ./release-binaries
+
+      - name: Prepare release assets
+        run: |
+          mkdir -p release-assets
+          find ./release-binaries -type f -exec cp {} ./release-assets/ \;
+          ls -lh ./release-assets/
+
+      - name: Generate release notes
+        id: release_notes
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          # Get previous tag
+          PREV_TAG=$(git describe --tags --abbrev=0 ${VERSION}^ 2>/dev/null || echo "")
+
+          cat > release-notes.md << 'EOF'
+          ## Subgen ${{ needs.prepare.outputs.version }}
+
+          Subtitle generation system with Go orchestrator and Python Whisper worker.
+
+          ### 🚀 Docker Images
+
+          **Orchestrator (Go):**
+          ```bash
+          docker pull lenaxia/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}
+          docker pull lenaxia/subgen-orchestrator:latest
+          ```
+
+          **Worker - GPU Version (CUDA):**
+          ```bash
+          docker pull lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}
+          docker pull lenaxia/subgen-worker:latest
+          ```
+
+          **Worker - CPU Version:**
+          ```bash
+          docker pull lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu
+          docker pull lenaxia/subgen-worker:cpu
+          ```
+
+          ### 📦 Binary Downloads
+
+          Pre-built orchestrator binaries for multiple platforms:
+          - Linux (amd64, arm64)
+          - macOS (amd64, arm64)
+          - Windows (amd64)
+
+          ### 🔧 What's New
+
+          EOF
+
+          # Generate changelog if previous tag exists
+          if [ ! -z "$PREV_TAG" ]; then
+            echo "#### Changes since ${PREV_TAG}" >> release-notes.md
+            echo "" >> release-notes.md
+            git log ${PREV_TAG}..HEAD --pretty=format:"- %s (%h)" --no-merges >> release-notes.md
+          else
+            echo "Initial release" >> release-notes.md
+          fi
+
+          cat release-notes.md
+
+      - name: Create GitHub Release
+        uses: softprops/action-gh-release@v1
+        with:
+          tag_name: ${{ needs.prepare.outputs.version }}
+          name: Release ${{ needs.prepare.outputs.version }}
+          body_path: release-notes.md
+          draft: false
+          prerelease: false
+          files: |
+            release-assets/*
+        env:
+          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Post-release validation
+  validate-release:
+    name: Validate Release
+    runs-on: ubuntu-latest
+    needs: [prepare, create-release]
+    steps:
+      - name: Checkout code
+        uses: actions/checkout@v4
+
+      - name: Verify Docker images
+        run: |
+          echo "=== Verifying Docker images were published ==="
+
+          # Pull and verify orchestrator image
+          docker pull ${{ env.IMAGE_ORCHESTRATOR }}:${{ needs.prepare.outputs.version_short }}
+          docker inspect ${{ env.IMAGE_ORCHESTRATOR }}:${{ needs.prepare.outputs.version_short }}
+
+          # Verify worker GPU image
+          docker pull ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version_short }}
+          docker inspect ${{ env.IMAGE_WORKER_GPU }}:${{ needs.prepare.outputs.version_short }}
+
+          # Verify worker CPU image
+          docker pull ${{ env.IMAGE_WORKER_CPU }}:${{ needs.prepare.outputs.version_short }}-cpu
+          docker inspect ${{ env.IMAGE_WORKER_CPU }}:${{ needs.prepare.outputs.version_short }}-cpu
+
+          echo "✅ All Docker images verified"
+
+      - name: Verify GitHub release
+        run: |
+          echo "=== Verifying GitHub release ==="
+          gh release view ${{ needs.prepare.outputs.version }} --json name,tagName,assets
+          echo "✅ GitHub release verified"
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+
+  # Notification on completion
+  notify:
+    name: Notify Release Status
+    runs-on: ubuntu-latest
+    needs: [prepare, validate-release]
+    if: always()
+    steps:
+      - name: Report status
+        run: |
+          VERSION="${{ needs.prepare.outputs.version }}"
+
+          if [ "${{ needs.validate-release.result }}" = "success" ]; then
+            echo "🎉 Release $VERSION completed successfully!"
+            echo ""
+            echo "📦 Docker Images Published:"
+            echo "  Orchestrator:"
+            echo "    - lenaxia/subgen-orchestrator:${{ needs.prepare.outputs.version_short }}"
+            echo "    - lenaxia/subgen-orchestrator:latest"
+            echo ""
+            echo "  Worker (GPU):"
+            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}"
+            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-gpu"
+            echo "    - lenaxia/subgen-worker:latest"
+            echo ""
+            echo "  Worker (CPU):"
+            echo "    - lenaxia/subgen-worker:${{ needs.prepare.outputs.version_short }}-cpu"
+            echo "    - lenaxia/subgen-worker:cpu"
+            echo ""
+            echo "📋 GitHub Release:"
+            echo "  - https://github.com/${{ github.repository }}/releases/tag/$VERSION"
+          else
+            echo "❌ Release $VERSION failed"
+            echo "Check workflow logs for details"
+            exit 1
+          fi

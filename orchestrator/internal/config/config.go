@@ -96,12 +96,14 @@ type TranscriptionConfig struct {
 }
 
 type SkipConfig struct {
-	IfExternalSubtitlesExist bool
-	IfTargetSubtitlesExist   bool
-	IfInternalSubtitlesLang  string
-	SubtitleLanguages        []string
-	AudioLanguages           []string
-	OnlySubgenSubtitles      bool
+	IfExternalSubtitlesExist      bool
+	IfTargetSubtitlesExist        bool
+	IfInternalSubtitlesLang       string
+	SubtitleLanguages             []string
+	AudioLanguages                []string
+	OnlySubgenSubtitles           bool
+	PreferredAudioLanguages       []string
+	LimitToPreferredAudioLanguage bool
 }
 
 type PathMappingConfig struct {
@@ -193,12 +195,14 @@ func Load() (*Config, error) {
 		ProcessMediaOnPlay: v.GetBool("PROCESS_MEDIA_ON_PLAY"),
 
 		Skip: SkipConfig{
-			IfExternalSubtitlesExist: v.GetBool("SKIP_IF_EXTERNAL_SUBTITLES_EXIST"),
-			IfTargetSubtitlesExist:   v.GetBool("SKIP_IF_TARGET_SUBTITLES_EXIST"),
-			IfInternalSubtitlesLang:  v.GetString("SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE"),
-			SubtitleLanguages:        parseStringList(v.GetString("SKIP_SUBTITLE_LANGUAGES")),
-			AudioLanguages:           parseStringList(v.GetString("SKIP_IF_AUDIO_LANGUAGES")),
-			OnlySubgenSubtitles:      v.GetBool("SKIP_ONLY_SUBGEN_SUBTITLES"),
+			IfExternalSubtitlesExist:      v.GetBool("SKIP_IF_EXTERNAL_SUBTITLES_EXIST"),
+			IfTargetSubtitlesExist:        v.GetBool("SKIP_IF_TARGET_SUBTITLES_EXIST"),
+			IfInternalSubtitlesLang:       v.GetString("SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE"),
+			SubtitleLanguages:             parseStringList(v.GetString("SKIP_SUBTITLE_LANGUAGES")),
+			AudioLanguages:                parseStringList(v.GetString("SKIP_IF_AUDIO_LANGUAGES")),
+			OnlySubgenSubtitles:           v.GetBool("SKIP_ONLY_SUBGEN_SUBTITLES"),
+			PreferredAudioLanguages:       parseStringList(v.GetString("PREFERRED_AUDIO_LANGUAGES")),
+			LimitToPreferredAudioLanguage: v.GetBool("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE"),
 		},
 
 		PathMapping: PathMappingConfig{
@@ -306,7 +310,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("FILE_STABILITY_TIMEOUT", 60)
 
 	// ASR
-	v.SetDefault("ASR_TIMEOUT", 30) // 30 seconds default
+	v.SetDefault("ASR_TIMEOUT", 300) // 300 seconds (5 minutes) for longer audio files
 
 	// Whisper Advanced Options
 	v.SetDefault("SUBGEN_KWARGS", "")       // Empty JSON by default

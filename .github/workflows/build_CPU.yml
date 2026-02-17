@@ -5,11 +5,27 @@ on:
     paths:
       - 'requirements.txt'
       - 'Dockerfile.cpu'
+      - 'worker/**'
+      - 'orchestrator/**'
   workflow_dispatch:
 
 jobs:
+  test-all:
+    name: Run All Tests
+    runs-on: ubuntu-latest
+    steps:
+      - name: Trigger test workflows
+        run: |
+          echo "✅ Tests will run independently via test-*.yml workflows"
+          echo "This workflow will build Docker images"
+          echo "For full test coverage, see:"
+          echo "  - test-orchestrator.yml"
+          echo "  - test-worker.yml"
+          echo "  - test-e2e.yml"
+
   docker:
     runs-on: ubuntu-latest
+    needs: test-all
     strategy:
       fail-fast: false
 

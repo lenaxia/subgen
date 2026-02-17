@@ -262,7 +262,7 @@ func TestDetectLanguage_Success(t *testing.T) {
 
 	// Test
 	ctx := context.Background()
-	resp, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/audio.mp3")
+	resp, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/audio.mp3", 0.0, 30.0)
 
 	// Verify
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestDetectLanguage_Failure(t *testing.T) {
 
 	// Test
 	ctx := context.Background()
-	_, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/invalid.mp3")
+	_, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/invalid.mp3", 0.0, 30.0)
 
 	// Verify
 	require.Error(t, err)

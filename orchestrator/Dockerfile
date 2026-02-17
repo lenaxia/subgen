@@ -29,8 +29,8 @@ RUN CGO_ENABLED=0 GOOS=linux GOARCH=amd64 go build \
 # Runtime stage
 FROM alpine:latest
 
-# Install runtime dependencies
-RUN apk add --no-cache ca-certificates tzdata
+# Install runtime dependencies (ffmpeg includes ffprobe for embedded subtitle detection)
+RUN apk add --no-cache ca-certificates tzdata ffmpeg
 
 # Create non-root user
 RUN addgroup -g 568 -S subgen && \

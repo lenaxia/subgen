@@ -338,10 +338,24 @@ func (s *Server) handlePlex(c *fiber.Ctx) error {
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
-		s.log.WithError(err).Error("Failed to enqueue Plex task")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to queue task",
-		})
+		// Handle different error types with appropriate HTTP status codes
+		if err == queue.ErrDuplicateTask {
+			// Duplicate task - idempotent behavior, return success
+			s.log.WithError(err).Debug("Task already queued, returning OK")
+			return c.SendString("OK")
+		} else if err == queue.ErrQueueFull {
+			// Queue full - rate limiting
+			s.log.WithError(err).Warn("Queue is full, cannot accept task")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Queue is full, please try again later",
+			})
+		} else {
+			// Other errors - internal server error
+			s.log.WithError(err).Error("Failed to enqueue Plex task")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to queue task",
+			})
+		}
 	}
 
 	s.log.WithField("rating_key", ratingKey).Info("Plex task queued")
@@ -482,10 +496,21 @@ func (s *Server) handleJellyfin(c *fiber.Ctx) error {
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
-		s.log.WithError(err).Error("Failed to enqueue Jellyfin task")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to queue task",
-		})
+		// Handle different error types with appropriate HTTP status codes
+		if err == queue.ErrDuplicateTask {
+			s.log.WithError(err).Debug("Task already queued, returning OK")
+			return c.SendString("")
+		} else if err == queue.ErrQueueFull {
+			s.log.WithError(err).Warn("Queue is full, cannot accept task")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Queue is full, please try again later",
+			})
+		} else {
+			s.log.WithError(err).Error("Failed to enqueue Jellyfin task")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to queue task",
+			})
+		}
 	}
 
 	s.log.WithField("item_id", itemID).Info("Jellyfin task queued")
@@ -591,10 +616,21 @@ func (s *Server) handleEmby(c *fiber.Ctx) error {
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
-		s.log.WithError(err).Error("Failed to enqueue Emby task")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to queue task",
-		})
+		// Handle different error types with appropriate HTTP status codes
+		if err == queue.ErrDuplicateTask {
+			s.log.WithError(err).Debug("Task already queued, returning OK")
+			return c.SendString("")
+		} else if err == queue.ErrQueueFull {
+			s.log.WithError(err).Warn("Queue is full, cannot accept task")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Queue is full, please try again later",
+			})
+		} else {
+			s.log.WithError(err).Error("Failed to enqueue Emby task")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to queue task",
+			})
+		}
 	}
 
 	s.log.WithField("file_path", filePath).Info("Emby task queued")
@@ -679,10 +715,21 @@ func (s *Server) handleTautulli(c *fiber.Ctx) error {
 
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
-		s.log.WithError(err).Error("Failed to enqueue Tautulli task")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to queue task",
-		})
+		// Handle different error types with appropriate HTTP status codes
+		if err == queue.ErrDuplicateTask {
+			s.log.WithError(err).Debug("Task already queued, returning OK")
+			return c.SendString("")
+		} else if err == queue.ErrQueueFull {
+			s.log.WithError(err).Warn("Queue is full, cannot accept task")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Queue is full, please try again later",
+			})
+		} else {
+			s.log.WithError(err).Error("Failed to enqueue Tautulli task")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to queue task",
+			})
+		}
 	}
 
 	s.log.WithField("file_path", file).Info("Tautulli task queued")
@@ -810,10 +857,23 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
 		close(resultChan) // Clean up channel
-		s.log.WithError(err).Error("Failed to enqueue ASR task")
-		return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
-			"error": "Failed to queue task",
-		})
+		// Handle different error types with appropriate HTTP status codes
+		if err == queue.ErrDuplicateTask {
+			s.log.WithError(err).Debug("Task already queued, returning conflict")
+			return c.Status(fiber.StatusConflict).JSON(fiber.Map{
+				"error": "Task already queued or processing",
+			})
+		} else if err == queue.ErrQueueFull {
+			s.log.WithError(err).Warn("Queue is full, cannot accept task")
+			return c.Status(fiber.StatusTooManyRequests).JSON(fiber.Map{
+				"error": "Queue is full, please try again later",
+			})
+		} else {
+			s.log.WithError(err).Error("Failed to enqueue ASR task")
+			return c.Status(fiber.StatusInternalServerError).JSON(fiber.Map{
+				"error": "Failed to queue task",
+			})
+		}
 	}
 
 	s.log.WithFields(map[string]interface{}{

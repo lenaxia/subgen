@@ -99,8 +99,8 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 	}
 	defer src.Close()
 
-	// Create temporary file
-	tmpDir := os.TempDir()
+	// Create temporary file in /media (shared with worker)
+	tmpDir := "/media"
 	tmpFile, err := os.CreateTemp(tmpDir, "detect-*.tmp")
 	if err != nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{

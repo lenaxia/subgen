@@ -3,6 +3,7 @@ package queue
 import (
 	"crypto/sha256"
 	"encoding/hex"
+	"fmt"
 	"time"
 )
 
@@ -93,9 +94,32 @@ func NewTask(filePath string, taskType TaskType) *Task {
 	return t
 }
 
-// ComputeID generates a unique ID from file path
+// ComputeID generates a unique ID from file path and other identifying fields
 func (t *Task) ComputeID() string {
-	hash := sha256.Sum256([]byte(t.FilePath))
+	// Build a unique identifier string that includes all relevant fields
+	// This ensures tasks with same FilePath but different PlexItemID/JellyfinItemID are distinct
+	var idString string
+
+	if t.FilePath != "" {
+		// Most common case: task has a file path
+		idString = t.FilePath
+	} else if t.PlexItemID != "" {
+		// Plex task without file path yet (will be fetched during dispatch)
+		idString = fmt.Sprintf("plex:%s:%s", t.PlexServer, t.PlexItemID)
+	} else if t.JellyfinItemID != "" {
+		// Jellyfin task without file path yet
+		idString = fmt.Sprintf("jellyfin:%s:%s", t.JellyfinServer, t.JellyfinItemID)
+	} else if len(t.AudioContent) > 0 {
+		// ASR task with audio content (Bazarr upload)
+		// Use hash of audio content for uniqueness
+		contentHash := sha256.Sum256(t.AudioContent)
+		idString = fmt.Sprintf("asr:content:%x", contentHash)
+	} else {
+		// Fallback: empty string (should be rare)
+		idString = ""
+	}
+
+	hash := sha256.Sum256([]byte(idString))
 	return hex.EncodeToString(hash[:])
 }
 
