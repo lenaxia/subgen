@@ -41,9 +41,10 @@ jobs:
 
       - name: Install Python dependencies
         working-directory: ./worker
+        timeout-minutes: 15
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt --timeout=300
           pip install pytest pytest-cov pytest-asyncio pytest-mock
 
       - name: Run unit tests
@@ -88,9 +89,10 @@ jobs:
 
       - name: Install Python dependencies
         working-directory: ./worker
+        timeout-minutes: 15
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt --timeout=300
           pip install pytest pytest-asyncio pytest-mock
 
       - name: Verify test data exists
@@ -126,9 +128,10 @@ jobs:
 
       - name: Install Python dependencies
         working-directory: ./worker
+        timeout-minutes: 15
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt --timeout=300
           pip install pytest pytest-mock psutil
 
       - name: Run memory leak tests
@@ -159,9 +162,10 @@ jobs:
 
       - name: Install Python dependencies
         working-directory: ./worker
+        timeout-minutes: 15
         run: |
           python -m pip install --upgrade pip
-          pip install -r requirements.txt
+          pip install -r requirements.txt --timeout=300
           pip install pytest
 
       - name: Download Whisper tiny model
