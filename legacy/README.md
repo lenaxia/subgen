@@ -25,9 +25,9 @@ If you're using the legacy version, please migrate to the new architecture:
 1. **Replace single container** with orchestrator + worker architecture
 2. **Update environment variables** to new format (see main README)
 3. **Use separate Docker images:**
-   - `lenaxia/subgen-orchestrator:latest` - Orchestrator
-   - `lenaxia/subgen-worker:latest` - Worker (GPU)
-   - `lenaxia/subgen-worker:cpu` - Worker (CPU-only)
+   - `ghcr.io/lenaxia/subgen-orchestrator:latest` - Orchestrator
+   - `ghcr.io/lenaxia/subgen-worker:latest` - Worker (GPU)
+   - `ghcr.io/lenaxia/subgen-worker:cpu` - Worker (CPU-only)
 
 ## Legacy CalVer Workflow
 

@@ -79,6 +79,7 @@ type Server struct {
 	metrics       *observability.Metrics // For observability metrics (STORY_07)
 	plexClient    *plex.Client           // Plex API client (STORY_03)
 	episodeQueuer *plex.EpisodeQueuer    // Episode queueing (STORY_03)
+	startTime     time.Time              // Server start time for uptime calculation
 	log           *logrus.Logger
 }
 
@@ -120,6 +121,7 @@ func NewServer(cfg *config.Config, queue QueueInterface, log *logrus.Logger) *Se
 		queue:      queue,
 		scanner:    nil, // Set via SetScanner() - optional dependency
 		pathMapper: pathMapper,
+		startTime:  time.Now(),
 		log:        log,
 	}
 
@@ -192,6 +194,11 @@ func (s *Server) setupRoutes() {
 	s.app.Get("/queue/processing", s.handleQueueProcessing())
 	s.app.Get("/queue/history", s.handleQueueHistory())
 	s.app.Get("/tasks/:id", s.handleTaskStatus())
+
+	// Health check endpoints (Kubernetes/Docker probes)
+	s.app.Get("/health", s.handleHealth)
+	s.app.Get("/ready", s.handleReady)
+	s.app.Get("/live", s.handleLive)
 }
 
 // Start begins listening for webhook requests
@@ -949,6 +956,66 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 			"error": fmt.Sprintf("transcription timeout after %v", timeout),
 		})
 	}
+}
+
+// handleHealth is the liveness probe endpoint
+// Returns 200 if the orchestrator process is alive
+// This endpoint should never return 5xx (otherwise K8s will restart the pod)
+func (s *Server) handleHealth(c *fiber.Ctx) error {
+	return c.JSON(fiber.Map{
+		"status":    "alive",
+		"timestamp": time.Now().Unix(),
+	})
+}
+
+// handleReady is the readiness probe endpoint
+// Returns 200 if orchestrator is ready to accept traffic
+// Returns 503 if alive but not ready (don't send traffic)
+func (s *Server) handleReady(c *fiber.Ctx) error {
+	// Check if worker pool is initialized
+	if s.workerPool == nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"status": "not_ready",
+			"reason": "worker_pool_not_initialized",
+		})
+	}
+
+	// Check if any workers are available
+	_, err := s.workerPool.SelectWorker()
+	if err != nil {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"status": "not_ready",
+			"reason": "no_workers_available",
+		})
+	}
+
+	// Check if queue is overloaded (more than 10000 tasks)
+	queueSize := s.queue.Size()
+	if queueSize > 10000 {
+		return c.Status(fiber.StatusServiceUnavailable).JSON(fiber.Map{
+			"status":     "not_ready",
+			"reason":     "queue_overloaded",
+			"queue_size": queueSize,
+		})
+	}
+
+	// Orchestrator is ready
+	return c.JSON(fiber.Map{
+		"status":            "ready",
+		"queue_size":        queueSize,
+		"workers_available": 1, // At least 1 worker is available if SelectWorker succeeded
+	})
+}
+
+// handleLive is an alternative liveness probe endpoint
+// Same as /health but includes uptime information
+func (s *Server) handleLive(c *fiber.Ctx) error {
+	uptimeSeconds := int64(time.Since(s.startTime).Seconds())
+	return c.JSON(fiber.Map{
+		"status":         "alive",
+		"uptime_seconds": uptimeSeconds,
+		"timestamp":      time.Now().Unix(),
+	})
 }
 
 // Helper function to check if string contains substring

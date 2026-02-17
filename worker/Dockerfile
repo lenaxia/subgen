@@ -6,6 +6,7 @@ FROM python:3.11-slim-bullseye
 # Install all dependencies (build + runtime) in one stage
 RUN apt-get update && apt-get install -y \
     ffmpeg \
+    curl \
     gcc \
     g++ \
     pkg-config \
@@ -32,16 +33,13 @@ COPY language_code.py ./
 # Set Python path
 ENV PYTHONPATH=/app/src:/app
 
-# Health check
-HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; \
-    channel = grpc.insecure_channel('localhost:50051'); \
-    stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); \
-    response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); \
-    exit(0 if response.status == 1 else 1)"
+# Health check using HTTP endpoint
+HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \
+    CMD curl -f http://localhost:8080/health || exit 1
 
-# Expose gRPC port
+# Expose gRPC port and HTTP health server port
 EXPOSE 50051
+EXPOSE 8080
 
 # TODO: Run as non-root user after fixing permissions
 # RUN useradd -m -u 1000 worker

@@ -46,7 +46,7 @@ version: '3.8'
 
 services:
   orchestrator:
-    image: lenaxia/subgen-orchestrator:latest
+    image: ghcr.io/lenaxia/subgen-orchestrator:latest
     container_name: subgen-orchestrator
     restart: unless-stopped
     ports:
@@ -76,8 +76,8 @@ services:
       - worker
 
   worker:
-    image: lenaxia/subgen-worker:latest  # For GPU
-    # image: lenaxia/subgen-worker:cpu   # For CPU-only
+    image: ghcr.io/lenaxia/subgen-worker:latest  # For GPU
+    # image: ghcr.io/lenaxia/subgen-worker:cpu   # For CPU-only
     container_name: subgen-worker
     restart: unless-stopped
     environment:
@@ -147,7 +147,7 @@ docker inspect subgen | grep -A 50 Env
 Replace your existing `docker-compose.yml` with the new two-service setup shown above.
 
 **Key Changes:**
-1. Replace `mccloud/subgen` image with `lenaxia/subgen-orchestrator` + `lenaxia/subgen-worker`
+1. Replace `mccloud/subgen` image with `ghcr.io/lenaxia/subgen-orchestrator` + `ghcr.io/lenaxia/subgen-worker`
 2. Add `WORKER_ADDRESS=worker:50051` to orchestrator environment
 3. Move GPU resources from orchestrator to worker
 4. Update model volume path from `/subgen/models` to `/models`
@@ -237,14 +237,14 @@ docker network create subgen-network
 docker run -d \
   --name subgen-worker \
   --network subgen-network \
-  lenaxia/subgen-worker:latest
+  ghcr.io/lenaxia/subgen-worker:latest
 
 # Run orchestrator
 docker run -d \
   --name subgen-orchestrator \
   --network subgen-network \
   -e WORKER_ADDRESS=subgen-worker:50051 \
-  lenaxia/subgen-orchestrator:latest
+  ghcr.io/lenaxia/subgen-orchestrator:latest
 ```
 
 ## Scaling Workers
@@ -254,21 +254,21 @@ One benefit of the new architecture is easy worker scaling:
 ```yaml
 services:
   orchestrator:
-    image: lenaxia/subgen-orchestrator:latest
+    image: ghcr.io/lenaxia/subgen-orchestrator:latest
     environment:
       - WORKER_ADDRESSES=worker1:50051,worker2:50051,worker3:50051
     # ... rest of config
 
   worker1:
-    image: lenaxia/subgen-worker:latest
+    image: ghcr.io/lenaxia/subgen-worker:latest
     # ... config
 
   worker2:
-    image: lenaxia/subgen-worker:latest
+    image: ghcr.io/lenaxia/subgen-worker:latest
     # ... config
 
   worker3:
-    image: lenaxia/subgen-worker:latest
+    image: ghcr.io/lenaxia/subgen-worker:latest
     # ... config
 ```
 
@@ -325,7 +325,7 @@ worker:
             count: all
             capabilities: [gpu]
 ```
-3. Use GPU image: `lenaxia/subgen-worker:latest` (not `:cpu`)
+3. Use GPU image: `ghcr.io/lenaxia/subgen-worker:latest` (not `:cpu`)
 4. Set device: `TRANSCRIBE_DEVICE=cuda`
 
 ## Rollback Procedure

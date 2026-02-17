@@ -9,6 +9,7 @@ performs audio transcription using faster-whisper.
 import logging
 import signal
 import sys
+import threading
 import time
 from concurrent import futures
 from typing import NoReturn
@@ -17,6 +18,7 @@ import grpc
 
 from config.settings import get_settings
 from grpc_server.server import create_grpc_server
+from http_server import init_health_server, run_health_server, shutdown_health_server
 from utils.logging import setup_logging
 
 
@@ -42,6 +44,15 @@ def serve() -> NoReturn:
     # Set servicer start time for uptime calculation
     servicer.start_time = time.time()
 
+    # Initialize HTTP health server
+    init_health_server(servicer)
+
+    # Start HTTP health server in background thread
+    http_port = config.system.http_port
+    logger.info(f"Starting HTTP health server on port {http_port}")
+    health_server = run_health_server("0.0.0.0", http_port)
+    logger.info(f"✅ HTTP health server started on port {http_port}")
+
     # Bind to port
     server_address = f"0.0.0.0:{config.system.grpc_port}"
     server.add_insecure_port(server_address)
@@ -53,7 +64,8 @@ def serve() -> NoReturn:
     # Setup graceful shutdown
     def handle_signal(signum: int, frame: object) -> None:
         logger.info(f"Received signal {signum}, shutting down gracefully...")
-        server.stop(grace=30)  # 30 second grace period
+        shutdown_health_server()  # Shutdown HTTP server first
+        server.stop(grace=30)  # 30 second grace period for gRPC
         sys.exit(0)
 
     signal.signal(signal.SIGINT, handle_signal)
@@ -64,6 +76,7 @@ def serve() -> NoReturn:
         server.wait_for_termination()
     except KeyboardInterrupt:
         logger.info("Interrupted by user, shutting down...")
+        shutdown_health_server()  # Shutdown HTTP server
         server.stop(grace=30)
 
     # This should never be reached, but satisfy type checker

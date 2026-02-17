@@ -1,0 +1,60 @@
+version: '3.8'
+
+services:
+  orchestrator:
+    build:
+      context: ./orchestrator
+      dockerfile: Dockerfile
+    container_name: subgen-orchestrator-dev
+    restart: unless-stopped
+    ports:
+      - "9000:9000"
+      - "9090:9090"
+    environment:
+      - WORKER_ADDRESS=worker:50051
+      - PLEX_SERVER=http://plex:32400
+      - PLEX_TOKEN=dummy
+      - DEBUG=true
+      - WEBHOOK_PORT=9000
+    volumes:
+      - ./test/testdata:/testdata:ro
+    depends_on:
+      worker:
+        condition: service_healthy
+    networks:
+      - subgen-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 10s
+
+  worker:
+    build:
+      context: ./worker
+      dockerfile: Dockerfile.cpu
+    container_name: subgen-worker-dev
+    restart: unless-stopped
+    ports:
+      - "50051:50051"
+      - "8080:8080"  # HTTP health server
+    environment:
+      - TRANSCRIBE_DEVICE=cpu
+      - WHISPER_MODEL=tiny
+      - DEBUG=true
+    volumes:
+      - ./test/testdata:/testdata:ro
+      - ./models:/models
+    networks:
+      - subgen-dev
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 10s
+      timeout: 5s
+      retries: 3
+      start_period: 30s
+
+networks:
+  subgen-dev:
+    driver: bridge

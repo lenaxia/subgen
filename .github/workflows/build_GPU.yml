@@ -18,8 +18,8 @@ jobs:
           echo "This workflow builds the legacy GPU Docker image"
           echo ""
           echo "For current architecture, use:"
-          echo "  - lenaxia/subgen-orchestrator:latest"
-          echo "  - lenaxia/subgen-worker:latest"
+          echo "  - ghcr.io/lenaxia/subgen-orchestrator:latest"
+          echo "  - ghcr.io/lenaxia/subgen-worker:latest"
 
   docker:
     runs-on: [self-hosted]

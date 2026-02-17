@@ -207,6 +207,12 @@ class SystemConfig(BaseSettings):
         le=65535,
         description="gRPC server port",
     )
+    http_port: int = Field(
+        default=8080,
+        ge=1024,
+        le=65535,
+        description="HTTP health check server port",
+    )
     webhook_port: int = Field(
         default=9000,
         validation_alias="WEBHOOKPORT",

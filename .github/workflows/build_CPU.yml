@@ -18,8 +18,8 @@ jobs:
           echo "This workflow builds the legacy CPU Docker image"
           echo ""
           echo "For current architecture, use:"
-          echo "  - lenaxia/subgen-orchestrator:latest"
-          echo "  - lenaxia/subgen-worker:cpu"
+          echo "  - ghcr.io/lenaxia/subgen-orchestrator:latest"
+          echo "  - ghcr.io/lenaxia/subgen-worker:cpu"
 
   docker:
     runs-on: ubuntu-latest

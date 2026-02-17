@@ -2,7 +2,7 @@ version: '3.8'
 
 services:
   orchestrator:
-    image: lenaxia/subgen-orchestrator:latest
+    image: ghcr.io/lenaxia/subgen-orchestrator:latest
     container_name: subgen-orchestrator
     restart: unless-stopped
     ports:
@@ -43,13 +43,20 @@ services:
       - "${MOVIES}:/movies"
       - ./config:/config
     depends_on:
-      - worker
+      worker:
+        condition: service_healthy
     networks:
       - subgen
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 40s
 
   worker:
-    image: lenaxia/subgen-worker:latest  # For GPU
-    # image: lenaxia/subgen-worker:cpu   # For CPU-only
+    image: ghcr.io/lenaxia/subgen-worker:latest  # For GPU
+    # image: ghcr.io/lenaxia/subgen-worker:cpu   # For CPU-only
     container_name: subgen-worker
     restart: unless-stopped
     environment:
@@ -78,6 +85,12 @@ services:
       - "${APPDATA}/subgen/models:/models"  # Persistent model storage
     networks:
       - subgen
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:8080/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+      start_period: 60s
     # Uncomment below for GPU support
     # deploy:
     #   resources:
