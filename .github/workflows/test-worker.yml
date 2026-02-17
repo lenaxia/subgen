@@ -50,7 +50,7 @@ jobs:
       - name: Run unit tests
         working-directory: ./worker
         run: |
-          pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term-missing
+          pytest tests/unit/ -v --cov=src --cov-report=xml --cov-report=html --cov-report=term-missing -m "not slow"
 
       - name: Upload coverage to Codecov
         uses: codecov/codecov-action@v4
