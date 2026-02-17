@@ -7,12 +7,12 @@ RUN apk add --no-cache git ca-certificates tzdata
 # Set working directory
 WORKDIR /build
 
-# Copy go mod files and vendor directory from orchestrator/
-COPY orchestrator/go.mod orchestrator/go.sum ./
-COPY orchestrator/vendor/ ./vendor/
+# Copy go mod files and vendor directory
+COPY go.mod go.sum ./
+COPY vendor/ ./vendor/
 
-# Copy source code from orchestrator/
-COPY orchestrator/ .
+# Copy source code
+COPY . .
 
 # Build arguments for version info
 ARG VERSION=dev
