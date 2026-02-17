@@ -37,7 +37,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg ffprobe
+          sudo apt-get install -y ffmpeg
 
       - name: Build Go orchestrator
         working-directory: ./orchestrator
@@ -110,7 +110,7 @@ jobs:
       - name: Install system dependencies
         run: |
           sudo apt-get update
-          sudo apt-get install -y ffmpeg ffprobe curl jq
+          sudo apt-get install -y ffmpeg curl jq
 
       - name: Build Go orchestrator
         working-directory: ./orchestrator
