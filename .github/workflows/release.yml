@@ -290,6 +290,7 @@ jobs:
     name: Create GitHub Release
     runs-on: ubuntu-latest
     needs: [prepare, build-binaries, build-docker-orchestrator, build-docker-worker-gpu, build-docker-worker-cpu]
+    if: ${{ always() && needs.prepare.result == 'success' && (needs.build-binaries.result == 'success') && (needs.build-docker-orchestrator.result == 'success') && (needs.build-docker-worker-gpu.result == 'success') && (needs.build-docker-worker-cpu.result == 'success') }}
     permissions:
       contents: write
     steps:
