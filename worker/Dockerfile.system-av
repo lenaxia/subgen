@@ -10,15 +10,16 @@ RUN apt-get update && apt-get install -y \
 WORKDIR /app
 
 # Create requirements without 'av' package
-COPY requirements.txt /tmp/requirements.txt
+COPY worker/requirements.txt /tmp/requirements.txt
 RUN grep -v "^av==" /tmp/requirements.txt > requirements-no-av.txt || cp /tmp/requirements.txt requirements-no-av.txt
 
 # Install Python dependencies (excluding av since we have system package)
 RUN pip install --no-cache-dir -r requirements-no-av.txt
 
 # Copy application code
-COPY src/ ./src/
-COPY pb/ ./pb/
+COPY worker/src/ ./src/
+COPY worker/pb/ ./pb/
+COPY language_code.py ./
 
 # Set Python path
 ENV PYTHONPATH=/app/src:/app
