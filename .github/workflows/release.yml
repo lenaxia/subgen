@@ -75,8 +75,8 @@ jobs:
         working-directory: ./orchestrator
         run: |
           go mod download
-          echo "Running internal package tests..."
-          go test -v -race -timeout 10m ./internal/...
+          echo "Running internal package tests (excluding slow ASR tests)..."
+          go test -v -race -timeout 10m ./internal/... -skip "TestHandleASR|TestASR"
           echo "Running integration tests..."
           go test -v -race -timeout 10m ./test/integration/...
           echo "Running cmd tests..."

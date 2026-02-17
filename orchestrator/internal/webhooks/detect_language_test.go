@@ -3,6 +3,7 @@ package webhooks
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"io"
@@ -178,9 +179,10 @@ func TestHandleDetectLanguage_InvalidOffset(t *testing.T) {
 	// Verify error response
 	assert.Equal(t, fiber.StatusBadRequest, resp.StatusCode)
 
-	respBody, err := io.ReadAll(resp.Body)
+	var respJSON ErrorResponse
+	err = json.NewDecoder(resp.Body).Decode(&respJSON)
 	require.NoError(t, err)
-	assert.Contains(t, string(respBody), "offset must be >= 0")
+	assert.Contains(t, respJSON.Error, "offset must be >= 0")
 }
 
 // TestHandleDetectLanguage_InvalidLength tests error for invalid length
