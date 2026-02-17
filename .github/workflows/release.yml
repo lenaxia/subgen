@@ -417,14 +417,14 @@ jobs:
   notify:
     name: Notify Release Status
     runs-on: ubuntu-latest
-    needs: [prepare, validate-release]
+    needs: [prepare, create-release]
     if: always()
     steps:
       - name: Report status
         run: |
           VERSION="${{ needs.prepare.outputs.version }}"
 
-          if [ "${{ needs.validate-release.result }}" = "success" ]; then
+          if [ "${{ needs.create-release.result }}" = "success" ]; then
             echo "🎉 Release $VERSION completed successfully!"
             echo ""
             echo "📦 Docker Images Published:"
