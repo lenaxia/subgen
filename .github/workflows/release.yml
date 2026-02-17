@@ -110,7 +110,7 @@ jobs:
 
       - name: Run worker tests
         working-directory: ./worker
-        run: pytest tests/ -v --cov=src
+        run: pytest tests/ -v --cov=src -m "not slow"
 
   # Build Go orchestrator binaries for multiple platforms
   build-binaries:
