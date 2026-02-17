@@ -21,7 +21,7 @@ env:
   IMAGE_ORCHESTRATOR: lenaxia/subgen-orchestrator
   IMAGE_WORKER_GPU: lenaxia/subgen-worker
   IMAGE_WORKER_CPU: lenaxia/subgen-worker
-  GO_VERSION: '1.25'
+  GO_VERSION: '1.23'
   PYTHON_VERSION: '3.11'
 
 jobs:
@@ -69,7 +69,7 @@ jobs:
           cache-dependency-path: orchestrator/go.sum
 
       - name: Install FFmpeg
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg ffprobe
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Run all orchestrator tests
         working-directory: ./orchestrator
@@ -94,7 +94,7 @@ jobs:
           cache-dependency-path: worker/requirements.txt
 
       - name: Install system dependencies
-        run: sudo apt-get update && sudo apt-get install -y ffmpeg ffprobe
+        run: sudo apt-get update && sudo apt-get install -y ffmpeg
 
       - name: Install Python dependencies
         working-directory: ./worker

@@ -1,12 +1,9 @@
-name: Build_Subgen_Dockerfile_CPU
+name: Build_Subgen_Legacy_CPU
 
 on:
   push:
     paths:
-      - 'requirements.txt'
-      - 'Dockerfile.cpu'
-      - 'worker/**'
-      - 'orchestrator/**'
+      - 'legacy/**'
   workflow_dispatch:
 
 jobs:
@@ -16,12 +13,13 @@ jobs:
     steps:
       - name: Trigger test workflows
         run: |
+          echo "⚠️  LEGACY WORKFLOW - Building deprecated monolithic Python image"
           echo "✅ Tests will run independently via test-*.yml workflows"
-          echo "This workflow will build Docker images"
-          echo "For full test coverage, see:"
-          echo "  - test-orchestrator.yml"
-          echo "  - test-worker.yml"
-          echo "  - test-e2e.yml"
+          echo "This workflow builds the legacy CPU Docker image"
+          echo ""
+          echo "For current architecture, use:"
+          echo "  - lenaxia/subgen-orchestrator:latest"
+          echo "  - lenaxia/subgen-worker:cpu"
 
   docker:
     runs-on: ubuntu-latest
@@ -33,10 +31,10 @@ jobs:
       - name: Checkout
         uses: actions/checkout@v4
 
-      - name: Get version from subgen.py
+      - name: Get version from legacy/subgen.py
         id: get_version
         run: |
-          version=$(grep -oP "subgen_version\s*=\s*'\K[^']+" subgen.py)
+          version=$(grep -oP "subgen_version\s*=\s*'\K[^']+" legacy/subgen.py)
           echo "version=$version" >> $GITHUB_ENV
 
       - name: Set up QEMU
@@ -54,12 +52,12 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push CPU Docker image
+      - name: Build and push legacy CPU Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./legacy
           platforms: linux/amd64,linux/arm64
-          file: ./Dockerfile.cpu
+          file: ./legacy/Dockerfile.cpu
           push: true
           tags: |
             mccloud/subgen:cpu

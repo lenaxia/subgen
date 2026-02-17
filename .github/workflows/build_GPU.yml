@@ -1,12 +1,9 @@
-name: Build_Subgen_Dockerfile_GPU
+name: Build_Subgen_Legacy_GPU
 
 on:
   push:
     paths:
-      - 'requirements.txt'
-      - 'Dockerfile'
-      - 'worker/**'
-      - 'orchestrator/**'
+      - 'legacy/**'
   workflow_dispatch:
 
 jobs:
@@ -16,12 +13,13 @@ jobs:
     steps:
       - name: Trigger test workflows
         run: |
+          echo "⚠️  LEGACY WORKFLOW - Building deprecated monolithic Python image"
           echo "✅ Tests will run independently via test-*.yml workflows"
-          echo "This workflow will build Docker images"
-          echo "For full test coverage, see:"
-          echo "  - test-orchestrator.yml"
-          echo "  - test-worker.yml"
-          echo "  - test-e2e.yml"
+          echo "This workflow builds the legacy GPU Docker image"
+          echo ""
+          echo "For current architecture, use:"
+          echo "  - lenaxia/subgen-orchestrator:latest"
+          echo "  - lenaxia/subgen-worker:latest"
 
   docker:
     runs-on: [self-hosted]
@@ -33,10 +31,10 @@ jobs:
         with:
           fetch-depth: 0
 
-      - name: Get version from subgen.py
+      - name: Get version from legacy/subgen.py
         id: get_version
         run: |
-          version=$(grep -oP "subgen_version\s*=\s*'\K[^']+" subgen.py)
+          version=$(grep -oP "subgen_version\s*=\s*'\K[^']+" legacy/subgen.py)
           echo "version=$version" >> $GITHUB_ENV
 
       - name: Login to Docker Hub
@@ -45,10 +43,11 @@ jobs:
           username: ${{ secrets.DOCKERHUB_USERNAME }}
           password: ${{ secrets.DOCKERHUB_TOKEN }}
 
-      - name: Build and push GPU Docker image
+      - name: Build and push legacy GPU Docker image
         uses: docker/build-push-action@v5
         with:
-          context: .
+          context: ./legacy
+          file: ./legacy/Dockerfile
           push: true
           tags: |
             mccloud/subgen:latest
