@@ -44,6 +44,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         self.stats = {
             "jobs_processed": 0,
             "jobs_active": 0,
+            "jobs_failed": 0,
+            "consecutive_errors": 0,
+            "last_job_timestamp": 0,
+            "memory_mb": 0,
         }
         self.start_time: Optional[float] = time.time()
 
@@ -78,6 +82,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         # Get current memory usage
         process = psutil.Process()
         memory_mb = int(process.memory_info().rss / (1024 * 1024))
+
+        # Update stats with current memory
+        self.stats["memory_mb"] = memory_mb
 
         # Determine health status based on memory
         if memory_mb > self.config.system.memory_threshold_mb:
@@ -242,9 +249,13 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
 
             # Update stats
             self.stats["jobs_processed"] += 1
+            self.stats["last_job_timestamp"] = int(time.time())
             processing_time = time.time() - start_time
 
             if result.success:
+                # Reset consecutive errors on success
+                self.stats["consecutive_errors"] = 0
+
                 logger.info(
                     f"Transcription completed successfully: {result.subtitle_path} "
                     f"({result.segment_count} segments in {processing_time:.2f}s)"
@@ -265,6 +276,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     stats=stats,
                 )
             else:
+                # Track failure
+                self.stats["jobs_failed"] += 1
+                self.stats["consecutive_errors"] += 1
+
                 logger.error(f"Transcription failed: {result.error_message}")
                 return transcription_pb2.TranscribeResponse(
                     success=False,
@@ -272,6 +287,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 )
 
         except Exception as e:
+            # Track exception as failure
+            self.stats["jobs_failed"] += 1
+            self.stats["consecutive_errors"] += 1
+
             logger.exception(f"Transcription error: {e}")
             return transcription_pb2.TranscribeResponse(
                 success=False,

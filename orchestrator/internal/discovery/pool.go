@@ -150,17 +150,70 @@ func (p *Pool) healthCheckLoop(ctx context.Context) {
 	}
 }
 
-// watchLoop handles worker change events
+// watchLoop handles worker change events from discovery watch
+// Implements automatic reconnection with exponential backoff and max retries
 func (p *Pool) watchLoop(ctx context.Context, eventCh <-chan WorkerEvent) {
+	backoff := time.Second // Initial backoff: 1 second
+	maxBackoff := 30 * time.Second
+	maxRetries := 10 // Max reconnection attempts before falling back to periodic refresh
+	retryCount := 0
+
 	for {
 		select {
 		case <-ctx.Done():
+			p.log.Info("Watch loop context cancelled, stopping")
 			return
+
 		case event, ok := <-eventCh:
 			if !ok {
-				return
+				// Watch channel closed - connection lost
+				retryCount++
+
+				if retryCount > maxRetries {
+					p.log.WithField("retries", retryCount).Error("Max watch reconnection attempts exceeded, falling back to periodic refresh only")
+					return
+				}
+
+				p.log.WithFields(logrus.Fields{
+					"backoff": backoff,
+					"retry":   retryCount,
+				}).Warn("Watch channel closed, reconnecting after backoff")
+
+				// Wait before reconnecting (exponential backoff)
+				select {
+				case <-time.After(backoff):
+					// Increase backoff for next attempt (exponential)
+					backoff = backoff * 2
+					if backoff > maxBackoff {
+						backoff = maxBackoff
+					}
+				case <-ctx.Done():
+					return
+				}
+
+				// Attempt to re-establish watch
+				WorkerWatchReconnectsTotal.Inc()
+				newCh, err := p.discovery.Watch(ctx)
+				if err != nil {
+					p.log.WithError(err).Error("Failed to reconnect watch, will retry")
+					// Continue loop to retry with increased backoff
+					continue
+				}
+
+				p.log.WithField("retry", retryCount).Info("Successfully reconnected watch")
+
+				// Reset backoff on successful reconnection (but keep retry count)
+				backoff = time.Second
+				eventCh = newCh
+				continue
 			}
+
+			// Process the event
 			p.handleWorkerEvent(event)
+
+			// Reset backoff and retry count on successful event (connection is healthy)
+			backoff = time.Second
+			retryCount = 0
 		}
 	}
 }
@@ -172,15 +225,23 @@ func (p *Pool) handleWorkerEvent(event WorkerEvent) {
 
 	switch event.Type {
 	case EventTypeAdded:
-		p.workers = append(p.workers, event.Worker)
+		// Use slice replacement to avoid race conditions with Refresh()
+		newWorkers := make([]Worker, len(p.workers)+1)
+		copy(newWorkers, p.workers)
+		newWorkers[len(p.workers)] = event.Worker
+		p.workers = newWorkers
+
+		UpdateWorkerMetrics(p.workers) // Update Prometheus metrics
 		p.log.WithField("worker_id", event.Worker.ID).Info("Worker added")
 
 	case EventTypeRemoved:
 		p.workers = removeWorker(p.workers, event.Worker.ID)
+		UpdateWorkerMetrics(p.workers) // Update Prometheus metrics
 		p.log.WithField("worker_id", event.Worker.ID).Info("Worker removed")
 
 	case EventTypeUpdated:
 		p.workers = updateWorker(p.workers, event.Worker)
+		UpdateWorkerMetrics(p.workers) // Update Prometheus metrics
 		p.log.WithField("worker_id", event.Worker.ID).Debug("Worker updated")
 	}
 }

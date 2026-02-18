@@ -199,6 +199,11 @@ func (s *Server) setupRoutes() {
 	s.app.Get("/health", s.handleHealth)
 	s.app.Get("/ready", s.handleReady)
 	s.app.Get("/live", s.handleLive)
+
+	// K8s-friendly health check aliases
+	s.app.Get("/healthz", s.handleHealth) // K8s liveness standard
+	s.app.Get("/livez", s.handleLive)     // K8s liveness standard
+	s.app.Get("/readyz", s.handleReady)   // K8s readiness standard
 }
 
 // Start begins listening for webhook requests

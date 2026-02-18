@@ -1,0 +1,178 @@
+# yaml-language-server: $schema=https://raw.githubusercontent.com/bjw-s-labs/helm-charts/app-template-4.6.2/charts/other/app-template/values.schema.json
+
+# ============================================================================
+# Subgen Orchestrator - Kubernetes Deployment (Phase 2: Separate Deployments)
+# ============================================================================
+# Chart: bjw-s/app-template v4.6.2+
+# Deployment: Orchestrator only (discovers workers via K8s API)
+# ============================================================================
+
+# ============================================================================
+# Global Pod Configuration
+# ============================================================================
+defaultPodOptions:
+  # CRITICAL: ServiceAccount required for K8s API access
+  serviceAccountName: subgen-orchestrator
+  automountServiceAccountToken: true  # Required for K8s worker discovery
+  
+  securityContext:
+    fsGroup: 568  # Media server user
+    fsGroupChangePolicy: "OnRootMismatch"
+  
+  annotations:
+    reloader.stakater.com/auto: "true"  # Auto-reload on ConfigMap/Secret change
+
+# ============================================================================
+# Controllers
+# ============================================================================
+controllers:
+  main:
+    type: deployment
+    replicas: 1
+    strategy: Recreate  # Clean shutdown before new pod starts
+    
+    containers:
+      # ──────────────────────────────────────────────────────────────────
+      # Go Orchestrator Container
+      # ──────────────────────────────────────────────────────────────────
+      orchestrator:
+        image:
+          repository: ghcr.io/your-username/subgen-orchestrator
+          tag: "latest"  # IMPORTANT: Change to specific version in production (e.g., "1.0.0")
+          pullPolicy: Always
+        
+        env:
+          # Orchestrator config
+          WEBHOOK_PORT: "9000"
+          METRICS_PORT: "9090"
+          LOG_LEVEL: "info"
+          LOG_FORMAT: "json"
+          
+          # Worker discovery (Phase 2: Kubernetes)
+          WORKER_DISCOVERY: "kubernetes"
+          WORKER_SERVICE_NAME: "subgen-worker"  # K8s Service name for workers
+          WORKER_NAMESPACE: "media"  # Namespace where workers are deployed
+          WORKER_PORT: "50051"  # gRPC port on worker pods
+          
+          # Queue config (higher capacity for multiple workers)
+          QUEUE_MAX_SIZE: "5000"
+          QUEUE_WORKER_TIMEOUT: "18000"  # 5 hours
+          
+          # Processing flags
+          PROCESS_ADDED_MEDIA: "true"
+          PROCESS_MEDIA_ON_PLAY: "false"
+          TRANSCRIBE_OR_TRANSLATE: "transcribe"
+          
+          # Skip conditions
+          SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE: "eng"
+          SKIP_IF_TARGET_SUBTITLES_EXIST: "true"
+          
+          # Plex config (update to match your setup)
+          PLEX_SERVER: "http://plex.media.svc.cluster.local:32400"
+          PLEX_QUEUE_NEXT_EPISODE: "false"
+          
+          # Jellyfin config (update to match your setup)
+          JELLYFIN_SERVER: "http://jellyfin.media.svc.cluster.local:8096"
+        
+        envFrom:
+          - secretRef:
+              name: subgen-secrets  # PLEX_TOKEN, JELLYFIN_TOKEN
+        
+        ports:
+          - name: http
+            containerPort: 9000
+            protocol: TCP
+          - name: metrics
+            containerPort: 9090
+            protocol: TCP
+        
+        probes:
+          liveness:
+            enabled: true
+            type: HTTP
+            path: /healthz  # K8s liveness standard
+            port: 9000
+            spec:
+              initialDelaySeconds: 10
+              periodSeconds: 30
+              timeoutSeconds: 5
+              failureThreshold: 3
+          
+          readiness:
+            enabled: true
+            type: HTTP
+            path: /readyz  # K8s readiness standard (validates worker availability)
+            port: 9000
+            spec:
+              initialDelaySeconds: 5
+              periodSeconds: 10
+              timeoutSeconds: 3
+          
+          startup:
+            enabled: true
+            type: HTTP
+            path: /healthz  # K8s liveness check
+            port: 9000
+            spec:
+              initialDelaySeconds: 5
+              periodSeconds: 5
+              timeoutSeconds: 3
+              failureThreshold: 12  # 60 seconds max for startup
+        
+        resources:
+          requests:
+            memory: 64Mi
+            cpu: 100m
+          limits:
+            memory: 256Mi
+            cpu: 500m
+
+# ============================================================================
+# Services
+# ============================================================================
+service:
+  main:
+    controller: main
+    type: LoadBalancer
+    annotations:
+      metallb.universe.tf/loadBalancerIPs: 192.168.1.100  # IMPORTANT: Change to your static IP
+    ports:
+      http:
+        port: 9000
+        targetPort: http
+        protocol: HTTP
+      metrics:
+        port: 9090
+        targetPort: metrics
+        protocol: HTTP
+
+# ============================================================================
+# Persistence
+# ============================================================================
+persistence:
+  # Media files on NFS (read-write)
+  # Orchestrator needs access to write subtitle files
+  media:
+    enabled: true
+    type: nfs
+    server: 192.168.1.10  # IMPORTANT: Change to your NAS IP
+    path: /mnt/pool/media  # IMPORTANT: Change to your NFS export path
+    globalMounts:
+      - path: /media
+        readOnly: false  # RW for subtitle writing
+
+# ============================================================================
+# Monitoring (Prometheus)
+# ============================================================================
+serviceMonitor:
+  main:
+    enabled: true
+    serviceName: subgen-orchestrator
+    labels:
+      release: prometheus  # IMPORTANT: Match your Prometheus Operator selector
+    endpoints:
+      - port: metrics
+        scheme: http
+        path: /metrics
+        interval: 30s
+        scrapeTimeout: 10s

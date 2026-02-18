@@ -1,10 +1,39 @@
 # STORY_06: Enhanced Health Checks for Docker & Kubernetes
 
 **Epic:** EPIC_09  
-**Status:** Not Started  
-**Assignee:** TBD  
-**Effort:** 4-6 hours  
+**Status:** SPLIT INTO STORY_06A and STORY_06B  
+**Assignee:** N/A  
+**Effort:** 4-6 hours (total) → Split into 06A (4-5h) + 06B (2-3h)  
 **Priority:** High (Required for both Docker and K8s deployments)
+
+---
+
+## ⚠️ IMPORTANT: Story Has Been Split
+
+This story was deemed too large and has been split into two separate stories:
+
+- **[STORY_06A](./STORY_06A_worker_http_health.md)** - Worker HTTP Health Server (4-5h, HIGH priority)
+  - Implements Flask HTTP server on worker (port 8080)
+  - `/health`, `/ready`, `/metrics` endpoints
+  - Docker and K8s health probe configuration
+  - **MUST be completed for Phase 2**
+
+- **[STORY_06B](./STORY_06B_orchestrator_health.md)** - Orchestrator Health Check Enhancements (2-3h, MEDIUM priority)
+  - K8s-friendly endpoint aliases (`/healthz`, `/livez`, `/readyz`)
+  - Enhanced readiness check (validates worker availability)
+  - **Nice-to-have, can be done later**
+
+**Rationale for split**:
+- Original story was 660 lines (too large)
+- Worker and orchestrator are separate services
+- Worker health checks are critical for Phase 2, orchestrator enhancements are optional
+- Allows parallel development if needed
+
+**This file is kept for reference only.**
+
+---
+
+## Original Story Content (For Reference)
 
 ---
 

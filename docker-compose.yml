@@ -8,8 +8,12 @@ services:
     ports:
       - "9000:9000"  # Webhook and API port
     environment:
+      # Worker Discovery Mode (Optional)
+      # - WORKER_DISCOVERY=localhost  # Default: localhost (single worker in Docker Compose)
+      #                                # Use 'kubernetes' only when running in K8s cluster
+      
       # Worker Connection (Required)
-      - WORKER_ADDRESS=worker:50051
+      - WORKER_ADDRESS=worker:50051  # Used with localhost discovery mode
       
       # Media Server Configuration
       - PLEX_SERVER=http://plexserver:32400

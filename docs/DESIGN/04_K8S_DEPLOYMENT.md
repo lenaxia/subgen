@@ -24,6 +24,32 @@
 
 ## Overview
 
+### Deployment Modes
+
+Subgen supports two deployment modes for worker discovery:
+
+| Mode | Environment | Configuration | Use Case |
+|------|-------------|---------------|----------|
+| **localhost** | Docker Compose | `WORKER_DISCOVERY=localhost` (default)<br>`WORKER_ADDRESS=worker:50051` | Single worker, simple setup |
+| **kubernetes** | Kubernetes | `WORKER_DISCOVERY=kubernetes`<br>`WORKER_NAMESPACE=media`<br>`WORKER_SERVICE_NAME=worker` | Multiple workers, auto-scaling |
+
+**IMPORTANT:** The `kubernetes` mode ONLY works inside a Kubernetes cluster. If you try to use it in Docker Compose, you'll see this helpful error:
+
+```
+kubernetes discovery requires running inside a Kubernetes cluster.
+For Docker Compose deployments, use WORKER_DISCOVERY=localhost (or omit, it's the default).
+```
+
+**Default behavior:**
+- Docker Compose: Uses `localhost` mode automatically (no configuration needed)
+- Kubernetes: Must explicitly set `WORKER_DISCOVERY=kubernetes`
+
+**How it works:**
+- **localhost mode**: Connects to a single hardcoded worker address (Phase 1 deployment pattern)
+- **kubernetes mode**: Discovers workers dynamically via K8s Endpoints API (Phase 2 deployment pattern)
+
+---
+
 ### Why bjw-s app-template?
 
 **Decision**: Use bjw-s Helm chart instead of custom chart
@@ -607,7 +633,28 @@ persistence:
 
 ### Installation (Phase 2)
 
+**IMPORTANT**: Phase 2 requires RBAC setup before installation.
+
 ```bash
+# 0. Apply RBAC resources (REQUIRED for Phase 2)
+kubectl apply -f deploy/rbac.yaml
+
+# Verify RBAC permissions
+kubectl auth can-i get endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
+kubectl auth can-i list endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
+kubectl auth can-i watch endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
 # 1. Install workers first
 helm install subgen-worker bjw-s/app-template \
   --namespace media \
@@ -648,6 +695,445 @@ kubectl get pods -n media -l app.kubernetes.io/name=subgen-worker
 ```
 
 **Orchestrator automatically detects new workers** (no restart needed).
+
+---
+
+## RBAC Configuration (Phase 2 Only)
+
+### Overview
+
+Phase 2 requires the orchestrator to access the Kubernetes API to discover worker pods dynamically. RBAC (Role-Based Access Control) grants these permissions securely.
+
+### What Gets Created
+
+The `deploy/rbac.yaml` file creates three resources:
+
+1. **ServiceAccount** (`subgen-orchestrator`)
+   - Identity for the orchestrator pod
+   - Authenticates to Kubernetes API
+   - Token auto-mounted at `/var/run/secrets/kubernetes.io/serviceaccount/token`
+
+2. **Role** (`subgen-orchestrator`)
+   - Defines permissions
+   - Read-only access to `endpoints` resource
+   - Verbs: `get`, `list`, `watch`
+   - Scoped to `media` namespace only
+
+3. **RoleBinding** (`subgen-orchestrator`)
+   - Links ServiceAccount to Role
+   - Grants orchestrator pod the defined permissions
+
+### Security Considerations
+
+**✅ Follows Principle of Least Privilege:**
+- **Read-only**: No write access (`create`, `update`, `patch`, `delete`)
+- **Single resource**: Only `endpoints` (no pods, services, secrets, configmaps)
+- **Namespace-scoped**: Only `media` namespace (not cluster-wide)
+- **Auto-rotated**: Kubernetes handles token lifecycle
+
+**❌ Does NOT grant:**
+- Write access to any resources
+- Access to secrets or configmaps
+- Access to pods directly
+- Cluster-wide permissions
+
+### Installation
+
+```bash
+# Apply RBAC resources
+kubectl apply -f deploy/rbac.yaml
+
+# Verify resources created
+kubectl get sa,role,rolebinding -n media | grep subgen-orchestrator
+# Expected:
+# serviceaccount/subgen-orchestrator
+# role.rbac.authorization.k8s.io/subgen-orchestrator
+# rolebinding.rbac.authorization.k8s.io/subgen-orchestrator
+```
+
+### Verification
+
+Test that the ServiceAccount has correct permissions:
+
+```bash
+# Should have read access
+kubectl auth can-i get endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
+kubectl auth can-i list endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
+kubectl auth can-i watch endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+
+# Should NOT have write access
+kubectl auth can-i delete endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: no
+
+kubectl auth can-i create pods \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: no
+
+kubectl auth can-i get secrets \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: no
+```
+
+### Troubleshooting RBAC
+
+**Symptom**: Orchestrator logs show `forbidden: endpoints`
+
+**Cause**: RBAC not applied or ServiceAccount not configured
+
+**Solution**:
+
+```bash
+# 1. Verify RBAC resources exist
+kubectl get sa,role,rolebinding -n media | grep subgen-orchestrator
+
+# 2. If missing, apply RBAC
+kubectl apply -f deploy/rbac.yaml
+
+# 3. Verify orchestrator pod uses ServiceAccount
+kubectl get pod -n media -l app.kubernetes.io/name=subgen-orchestrator -o yaml | grep serviceAccountName
+# Should show: serviceAccountName: subgen-orchestrator
+
+# 4. If not using ServiceAccount, verify Helm values
+grep serviceAccountName deploy/values-phase2-orchestrator.yaml
+# Should show: serviceAccountName: subgen-orchestrator
+
+# 5. Restart orchestrator to pick up changes
+kubectl rollout restart deployment subgen-orchestrator -n media
+```
+
+### How It Works
+
+1. **Pod starts**: Kubernetes mounts ServiceAccount token into pod
+2. **Client-go initializes**: Reads token from `/var/run/secrets/kubernetes.io/serviceaccount/token`
+3. **API request**: Orchestrator calls `client.CoreV1().Endpoints(namespace).Get()`
+4. **K8s API server**: Validates token, checks RBAC permissions
+5. **Authorization**: Allows request because Role grants `get endpoints`
+6. **Response**: Returns endpoint data to orchestrator
+
+### RBAC File Contents
+
+See `deploy/rbac.yaml` for the complete RBAC configuration. Key sections:
+
+```yaml
+# ServiceAccount
+apiVersion: v1
+kind: ServiceAccount
+metadata:
+  name: subgen-orchestrator
+  namespace: media
+
+---
+# Role (permissions)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: Role
+metadata:
+  name: subgen-orchestrator
+  namespace: media
+rules:
+- apiGroups: [""]
+  resources: ["endpoints"]
+  verbs: ["get", "list", "watch"]
+
+---
+# RoleBinding (grant permissions)
+apiVersion: rbac.authorization.k8s.io/v1
+kind: RoleBinding
+metadata:
+  name: subgen-orchestrator
+  namespace: media
+subjects:
+- kind: ServiceAccount
+  name: subgen-orchestrator
+  namespace: media
+roleRef:
+  kind: Role
+  name: subgen-orchestrator
+  apiGroup: rbac.authorization.k8s.io
+```
+
+---
+
+## Real-Time Worker Discovery (Watch API)
+
+### Overview
+
+Phase 2 uses Kubernetes Watch API for real-time worker discovery, eliminating the need for periodic polling and enabling instant response to worker scaling events.
+
+### How It Works
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Orchestrator Pod                                           │
+├─────────────────────────────────────────────────────────────┤
+│  1. Periodic Refresh (30s)                                  │
+│     • Full health checks                                    │
+│     • Get worker status (active jobs)                       │
+│     • Fallback if watch fails                               │
+│                                                              │
+│  2. Watch Loop (real-time)                                  │
+│     • K8s API: Watch Endpoints                              │
+│     • Events: Added, Modified, Deleted                      │
+│     • No health checks (instant response)                   │
+│     • Auto-reconnection with backoff                        │
+└─────────────────────────────────────────────────────────────┘
+           ↕ gRPC health checks (30s)    ↕ Watch events (instant)
+┌──────────────────────────┐  ┌──────────────────────────┐
+│  K8s Endpoints API       │  │  K8s Watch API           │
+│  GET /api/v1/endpoints   │  │  WATCH /api/v1/endpoints │
+└──────────────────────────┘  └──────────────────────────┘
+```
+
+### Dual-Mode Discovery
+
+The orchestrator combines two discovery mechanisms:
+
+| Mode | Interval | Purpose | Health Checks |
+|------|----------|---------|---------------|
+| **Periodic Refresh** | 30 seconds | Full health status, active jobs | Yes (5s timeout per worker) |
+| **Watch Events** | Real-time (instant) | Worker additions/removals | No (assumes healthy) |
+
+**Why both?**
+- **Watch**: Fast response to scaling events (0-100ms latency)
+- **Periodic**: Authoritative health status and load metrics
+
+### Watch Events
+
+The orchestrator responds to three event types:
+
+#### 1. Worker Added (EventTypeAdded)
+```go
+// When: New worker pod becomes ready
+// Action: Add to worker pool immediately
+// Metrics: worker_watch_events_total{type="added"}
+```
+
+**Timeline:**
+```
+t=0:    kubectl scale statefulset worker --replicas=5
+t=2s:   New pod worker-4 starts
+t=15s:  Pod passes readiness probe
+t=15.1s: K8s adds IP to Endpoints
+t=15.1s: Watch event emitted
+t=15.1s: Orchestrator adds worker-4 to pool
+        ✓ New jobs can be routed to worker-4
+```
+
+#### 2. Worker Removed (EventTypeRemoved)
+```go
+// When: Worker pod deleted or becomes unready
+// Action: Remove from worker pool immediately
+// Metrics: worker_watch_events_total{type="removed"}
+```
+
+**Timeline:**
+```
+t=0:    kubectl delete pod worker-2
+t=0.1s: K8s removes IP from Endpoints
+t=0.1s: Watch event emitted
+t=0.1s: Orchestrator removes worker-2 from pool
+        ✓ No new jobs routed to worker-2
+```
+
+#### 3. Worker Updated (EventTypeUpdated)
+```go
+// When: Worker health status changes
+// Action: Update worker metadata
+// Metrics: worker_watch_events_total{type="updated"}
+```
+
+**Note:** Currently only detects health changes from periodic refresh, not watch events.
+
+### Watch Reconnection
+
+The watch connection can disconnect due to:
+- Kubernetes API server restart
+- Network interruptions
+- Long-running watch timeout (K8s default: ~30 minutes)
+
+**Reconnection Strategy:**
+
+```
+┌─────────────────────────────────────────────────────────────┐
+│  Watch Reconnection with Exponential Backoff               │
+├─────────────────────────────────────────────────────────────┤
+│  Attempt 1:  Wait 1s  → Reconnect                           │
+│  Attempt 2:  Wait 2s  → Reconnect                           │
+│  Attempt 3:  Wait 4s  → Reconnect                           │
+│  Attempt 4:  Wait 8s  → Reconnect                           │
+│  Attempt 5:  Wait 16s → Reconnect                           │
+│  Attempt 6:  Wait 30s → Reconnect (max backoff)             │
+│  ...                                                         │
+│  Attempt 10: Wait 30s → Reconnect                           │
+│  Attempt 11: STOP - Fall back to periodic refresh only      │
+│                                                              │
+│  Metrics: worker_watch_reconnects_total                     │
+└─────────────────────────────────────────────────────────────┘
+```
+
+**Configuration:**
+- **Initial backoff**: 1 second
+- **Max backoff**: 30 seconds (capped)
+- **Max retries**: 10 attempts
+- **Fallback**: Periodic refresh continues working
+
+**Why 10 retries?**
+- Prevents infinite reconnection loops on persistent K8s API failures
+- After 10 failures, something is fundamentally wrong (investigate manually)
+- Periodic refresh (30s) still provides eventual consistency
+
+### Watch Metrics
+
+Monitor watch health via Prometheus:
+
+```promql
+# Watch events by type
+rate(subgen_worker_watch_events_total[5m])
+
+# Watch reconnections (should be rare)
+rate(subgen_worker_watch_reconnects_total[5m])
+
+# Watch errors from K8s API
+rate(subgen_worker_watch_errors_total[5m])
+
+# Worker discovery errors (fallback to periodic)
+rate(subgen_worker_discovery_errors_total[5m])
+```
+
+**Alert rules:**
+
+```yaml
+# High watch reconnection rate
+- alert: HighWatchReconnectionRate
+  expr: rate(subgen_worker_watch_reconnects_total[5m]) > 0.1
+  for: 10m
+  annotations:
+    summary: "Orchestrator watch reconnecting frequently"
+    description: "Watch reconnections: {{ $value }}/s over 5m"
+
+# Watch fallback (no events for 10 minutes)
+- alert: WatchEventsStopped
+  expr: rate(subgen_worker_watch_events_total[10m]) == 0
+  for: 15m
+  annotations:
+    summary: "No watch events received (possible watch failure)"
+    description: "May have fallen back to periodic refresh only"
+```
+
+### Performance Comparison
+
+| Scenario | Periodic Only (30s) | Watch + Periodic |
+|----------|---------------------|------------------|
+| Worker scale up (3→5) | 0-30s delay | 0-2s delay (instant) |
+| Worker crash | 0-30s delay | 0-1s delay (instant) |
+| Health check overhead | All workers every 30s | All workers every 30s |
+| Network overhead | Endpoints GET every 30s | Endpoints GET + Watch stream |
+| Resilience | Always works | Fallback to periodic on failure |
+
+**Best of both worlds:**
+- Watch provides instant response (UX)
+- Periodic provides authoritative health (correctness)
+
+### Troubleshooting Watch
+
+#### Watch Not Connecting
+
+**Symptom:** Logs show `Worker watch not supported`
+
+**Check RBAC permissions:**
+```bash
+kubectl auth can-i watch endpoints \
+  --as=system:serviceaccount:media:subgen-orchestrator \
+  -n media
+# Expected: yes
+```
+
+**If no:**
+```bash
+# Apply RBAC
+kubectl apply -f deploy/rbac.yaml
+
+# Restart orchestrator
+kubectl rollout restart deployment subgen-orchestrator -n media
+```
+
+#### Watch Reconnecting Frequently
+
+**Symptom:** Metrics show high `worker_watch_reconnects_total`
+
+**Possible causes:**
+- Kubernetes API server instability
+- Network issues between pod and API server
+- K8s version too old (watch timeouts)
+
+**Check K8s API logs:**
+```bash
+# On control plane node
+kubectl logs -n kube-system kube-apiserver-xxx
+```
+
+**Workaround:**
+- Watch fallback handles this gracefully
+- Periodic refresh (30s) continues working
+- No action needed unless reconnections > 1/minute
+
+#### Watch Events Not Received
+
+**Symptom:** Worker scaled but orchestrator doesn't see it
+
+**Verify watch is running:**
+```bash
+kubectl logs -n media -l app.kubernetes.io/name=subgen-orchestrator | grep -i watch
+# Should see:
+# level=info msg="Starting Kubernetes endpoints watch for dynamic worker discovery"
+# level=info msg="Kubernetes watch established successfully"
+```
+
+**Check for watch errors:**
+```bash
+kubectl logs -n media -l app.kubernetes.io/name=subgen-orchestrator | grep -i "watch error"
+```
+
+**Verify Endpoints exist:**
+```bash
+kubectl get endpoints -n media subgen-worker -o yaml
+# Should show IPs in subsets.addresses[]
+```
+
+#### Max Retries Exceeded
+
+**Symptom:** Logs show `Max watch reconnection attempts exceeded, falling back to periodic refresh only`
+
+**Impact:**
+- Watch disabled (no real-time events)
+- Periodic refresh continues (30s delay)
+- System still functional, just slower
+
+**Action required:**
+```bash
+# 1. Check K8s API health
+kubectl get --raw /healthz
+
+# 2. Check orchestrator pod events
+kubectl describe pod -n media -l app.kubernetes.io/name=subgen-orchestrator
+
+# 3. Restart orchestrator to retry
+kubectl rollout restart deployment subgen-orchestrator -n media
+```
 
 ---
 

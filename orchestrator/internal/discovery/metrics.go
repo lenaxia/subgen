@@ -40,6 +40,31 @@ var (
 			Buckets: prometheus.DefBuckets,
 		},
 	)
+
+	// WorkerWatchEventsTotal tracks watch events by type (added, removed, updated, error)
+	WorkerWatchEventsTotal = promauto.NewCounterVec(
+		prometheus.CounterOpts{
+			Name: "subgen_worker_watch_events_total",
+			Help: "Total worker watch events by type",
+		},
+		[]string{"type"}, // added, removed, updated, error
+	)
+
+	// WorkerWatchReconnectsTotal tracks watch reconnection attempts
+	WorkerWatchReconnectsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subgen_worker_watch_reconnects_total",
+			Help: "Total watch reconnection attempts",
+		},
+	)
+
+	// WorkerWatchErrorsTotal tracks watch errors
+	WorkerWatchErrorsTotal = promauto.NewCounter(
+		prometheus.CounterOpts{
+			Name: "subgen_worker_watch_errors_total",
+			Help: "Total watch errors from Kubernetes API",
+		},
+	)
 )
 
 // UpdateWorkerMetrics updates worker count metrics
