@@ -2,7 +2,7 @@
 # Generate Python gRPC code from protobuf definition
 #
 # Requirements:
-#   pip install grpcio-tools
+#   pip install grpcio-tools==1.78.0 protobuf==4.25.3  # Must match requirements.txt
 #
 # Usage:
 #   ./generate_proto.sh
