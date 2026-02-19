@@ -30,8 +30,8 @@ COPY worker/src/ ./src/
 COPY worker/pb/ ./pb/
 COPY language_code.py ./
 
-# Set Python path
-ENV PYTHONPATH=/app/src:/app
+# Set Python path - include pb directory for protobuf imports
+ENV PYTHONPATH=/app/src:/app:/app/pb
 
 # Health check using HTTP endpoint
 HEALTHCHECK --interval=30s --timeout=10s --retries=3 --start-period=60s \

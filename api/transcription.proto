@@ -3,6 +3,7 @@ syntax = "proto3";
 package subgen.v1;
 
 option go_package = "github.com/mccloud/subgen/orchestrator/pkg/pb";
+option py_generic_services = true;
 
 // ============================================================================
 // Transcription Service
