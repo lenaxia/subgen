@@ -1,6 +1,6 @@
 # Core dependencies
-grpcio==1.78.0
-grpcio-tools==1.78.0
+grpcio==1.60.1
+grpcio-tools==1.60.1
 protobuf>=4.25.2,<6.0.0  # Allow newer protobuf versions for compatibility
 
 # ML/Transcription
