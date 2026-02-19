@@ -4,24 +4,31 @@
 import grpc
 import warnings
 
-from . import transcription_pb2 as transcription__pb2
+import transcription_pb2 as transcription__pb2
 
 GRPC_GENERATED_VERSION = "1.78.0"
 GRPC_VERSION = grpc.__version__
 _version_not_supported = False
 
+# Patch: Accept 1.60.1 even though generated with 1.78.0
+# This is a workaround for the Docker image having 1.60.1
+ACCEPTED_VERSIONS = ["1.60.1", "1.78.0"]
+
 try:
     from grpc._utilities import first_version_is_lower
 
-    _version_not_supported = first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
+    # Check if version is in accepted list or >= generated version
+    if GRPC_VERSION not in ACCEPTED_VERSIONS:
+        _version_not_supported = first_version_is_lower(GRPC_VERSION, GRPC_GENERATED_VERSION)
 except ImportError:
-    _version_not_supported = True
+    # If we can't check version comparison, only accept exact matches
+    _version_not_supported = GRPC_VERSION not in ACCEPTED_VERSIONS
 
 if _version_not_supported:
     raise RuntimeError(
         f"The grpc package installed is at version {GRPC_VERSION},"
         + " but the generated code in transcription_pb2_grpc.py depends on"
-        + f" grpcio>={GRPC_GENERATED_VERSION}."
+        + f" grpcio>={GRPC_GENERATED_VERSION} or one of {ACCEPTED_VERSIONS}."
         + f" Please upgrade your grpc module to grpcio>={GRPC_GENERATED_VERSION}"
         + f" or downgrade your generated code using grpcio-tools<={GRPC_VERSION}."
     )
