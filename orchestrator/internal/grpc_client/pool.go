@@ -63,9 +63,9 @@ func (p *ConnectionPool) Get(ctx context.Context, addr string) (*grpc.ClientConn
 	newConn, err := grpc.DialContext(ctx, addr,
 		grpc.WithTransportCredentials(insecure.NewCredentials()),
 		grpc.WithKeepaliveParams(keepalive.ClientParameters{
-			Time:                10 * time.Second,
-			Timeout:             5 * time.Second,
-			PermitWithoutStream: true,
+			Time:                60 * time.Second, // Reduced frequency
+			Timeout:             30 * time.Second, // Longer timeout
+			PermitWithoutStream: false,            // Only ping when there are active streams
 		}),
 	)
 	if err != nil {

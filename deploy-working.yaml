@@ -65,8 +65,8 @@ data:
   
   # Memory management
   MEMORY_THRESHOLD_MB: "3000"
-  MODEL_CLEANUP_DELAY: "30"
-  CLEAR_VRAM_ON_COMPLETE: "true"
+  MODEL_CLEANUP_DELAY: "300"  # 5 minutes for CPU workers
+  CLEAR_VRAM_ON_COMPLETE: "false"  # Keep model loaded for CPU workers
   
   # Subtitle configuration
   WORD_LEVEL_HIGHLIGHT: "false"
@@ -150,7 +150,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: orchestrator
-        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.4
+        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.7
         imagePullPolicy: Always
         env:
         - name: DEBUG
@@ -225,7 +225,7 @@ spec:
         runAsGroup: 0
       containers:
       - name: worker
-        image: ghcr.io/lenaxia/subgen-worker:v0.2.4-cpu
+        image: ghcr.io/lenaxia/subgen-worker:v0.2.7-cpu
         imagePullPolicy: Always
         envFrom:
         - configMapRef:

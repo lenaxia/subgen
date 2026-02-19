@@ -36,6 +36,11 @@ def create_grpc_server(config: WorkerSettings) -> tuple[grpc.Server, Transcripti
         options=[
             ("grpc.max_send_message_length", 100 * 1024 * 1024),  # 100MB
             ("grpc.max_receive_message_length", 100 * 1024 * 1024),  # 100MB
+            # Keepalive settings to prevent "too many pings" errors
+            ("grpc.keepalive_time_ms", 120000),  # 2 minutes
+            ("grpc.keepalive_timeout_ms", 20000),  # 20 seconds
+            ("grpc.http2.max_pings_without_data", 0),  # Allow pings without data
+            ("grpc.http2.min_ping_interval_without_data_ms", 300000),  # 5 minutes
         ],
     )
 
