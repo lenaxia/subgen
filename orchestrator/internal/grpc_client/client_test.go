@@ -69,7 +69,7 @@ func TestTranscribe_Success(t *testing.T) {
 	// Mock gRPC client
 	mockClient := &mockTranscriptionClient{
 		transcribeFunc: func(ctx context.Context, in *pb.TranscribeRequest, opts ...grpc.CallOption) (*pb.TranscribeResponse, error) {
-			assert.Equal(t, "/path/to/video.mp4", in.FilePath)
+			assert.Equal(t, "/path/to/video.mp4", in.GetFilePath())
 			assert.Equal(t, "transcribe", in.TaskType)
 			assert.Equal(t, "en", in.ForceLanguage)
 
