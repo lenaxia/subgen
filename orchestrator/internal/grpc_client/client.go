@@ -95,7 +95,6 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 
 	// Build request from task
 	req := &pb.TranscribeRequest{
-		FilePath:      task.FilePath,
 		TaskType:      task.TaskType,
 		ForceLanguage: task.ForceLanguage,
 		Options: &pb.TranscribeOptions{
@@ -103,6 +102,23 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 			WhisperThreads: c.getWhisperThreads(task),
 		},
 		Metadata: c.buildMetadata(task),
+	}
+
+	// Set audio source: either file_path or audio_content
+	if len(task.AudioContent) > 0 {
+		// ASR task with audio content
+		req.AudioSource = &pb.TranscribeRequest_AudioContent{
+			AudioContent: task.AudioContent,
+		}
+		c.log.WithField("audio_bytes", len(task.AudioContent)).Debug("Sending audio content in gRPC request")
+	} else if task.FilePath != "" {
+		// Media server task with file path
+		req.AudioSource = &pb.TranscribeRequest_FilePath{
+			FilePath: task.FilePath,
+		}
+		c.log.WithField("file_path", task.FilePath).Debug("Sending file path in gRPC request")
+	} else {
+		return nil, fmt.Errorf("task has neither file path nor audio content")
 	}
 
 	// Add timeout to context

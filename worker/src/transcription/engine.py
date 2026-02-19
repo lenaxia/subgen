@@ -81,7 +81,7 @@ class TranscriptionEngine:
 
     def transcribe(
         self,
-        file_path: str,
+        source: Any,  # str (file path) or bytes
         task_type: str,
         force_language: Optional[str],
         options: TranscribeOptions,
@@ -92,7 +92,7 @@ class TranscriptionEngine:
         This is the refactored version of gen_subtitles() from subgen.py:1227-1274
 
         Args:
-            file_path: Path to media file
+            source: File path or audio bytes
             task_type: "transcribe" or "translate"
             force_language: Forced language code (ISO 639-1) or None
             options: Transcription options
@@ -102,7 +102,22 @@ class TranscriptionEngine:
         """
         start_time = time.time()
 
+        # Handle byte content by writing to temp file
+        temp_file = None
         try:
+            if isinstance(source, bytes):
+                # Write bytes to temp file
+                import tempfile
+
+                temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                temp_file.write(source)
+                temp_file.close()
+                file_path = temp_file.name
+                logger.debug(f"Written {len(source)} bytes to temp file: {file_path}")
+            else:
+                # It's already a file path
+                file_path = source
+
             # Validate file
             if not os.path.exists(file_path):
                 raise FileNotFoundError(f"File not found: {file_path}")
@@ -217,6 +232,14 @@ class TranscriptionEngine:
             return TranscriptionResult(
                 success=False, subtitle_path="", detected_language="", error_message=str(e)
             )
+        finally:
+            # Clean up temp file if we created one
+            if temp_file and os.path.exists(temp_file.name):
+                try:
+                    os.unlink(temp_file.name)
+                    logger.debug(f"Cleaned up temp file: {temp_file.name}")
+                except Exception as e:
+                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
 
     def detect_language(
         self,

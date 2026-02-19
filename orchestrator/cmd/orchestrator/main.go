@@ -587,40 +587,10 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		}).Info("Fetched file path from Jellyfin")
 	}
 
-	// Handle ASR tasks with AudioContent: save to temp file in shared /media directory
-	var tempFilePath string
+	// ASR tasks with AudioContent are now sent directly via gRPC
+	// No need to create temp files since byte content is sent directly
 	if len(task.AudioContent) > 0 && task.FilePath == "" {
-		tmpFile, err := os.CreateTemp("/media", "asr-*.tmp")
-		if err != nil {
-			td.log.WithError(err).Error("Failed to create temp file for ASR audio")
-			sendResult(&queue.TranscriptionResult{
-				Error: fmt.Errorf("failed to create temp file: %w", err),
-			})
-			return
-		}
-		tempFilePath = tmpFile.Name()
-		defer os.Remove(tempFilePath) // Clean up after transcription
-
-		// Set file permissions so worker can read it (different user)
-		if err := os.Chmod(tempFilePath, 0666); err != nil {
-			tmpFile.Close()
-			td.log.WithError(err).Error("Failed to set permissions on temp file")
-		}
-
-		// Write audio content to temp file
-		if _, err := tmpFile.Write(task.AudioContent); err != nil {
-			tmpFile.Close()
-			td.log.WithError(err).Error("Failed to write ASR audio to temp file")
-			sendResult(&queue.TranscriptionResult{
-				Error: fmt.Errorf("failed to write audio content: %w", err),
-			})
-			return
-		}
-		tmpFile.Close()
-
-		// Use temp file path for transcription
-		task.FilePath = tempFilePath
-		td.log.WithField("temp_file", tempFilePath).Debug("Created temp file for ASR audio")
+		td.log.WithField("audio_bytes", len(task.AudioContent)).Debug("ASR task with audio content, will send via gRPC")
 	}
 
 	// Select a worker

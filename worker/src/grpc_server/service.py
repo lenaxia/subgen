@@ -188,17 +188,33 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
 
         Uses TranscriptionEngine and ModelManager for actual transcription.
         """
-        logger.info(f"Transcribe request received: file_path={request.file_path}")
+        # Determine audio source: file_path or audio_content
+        if request.WhichOneof("audio_source") == "file_path":
+            source_type = "file"
+            source = request.file_path
+            logger.info(f"Transcribe request received: file_path={request.file_path}")
 
-        # Validate file_path
-        if not request.file_path or request.file_path.strip() == "":
-            logger.error("Transcribe: file_path is required")
-            context.abort(grpc.StatusCode.INVALID_ARGUMENT, "file_path is required")
+            # Validate file exists
+            if not os.path.exists(request.file_path):
+                logger.error(f"Transcribe: file not found: {request.file_path}")
+                context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {request.file_path}")
 
-        # Validate file exists
-        if not os.path.exists(request.file_path):
-            logger.error(f"Transcribe: file not found: {request.file_path}")
-            context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {request.file_path}")
+        elif request.WhichOneof("audio_source") == "audio_content":
+            source_type = "bytes"
+            source = request.audio_content
+            logger.info(
+                f"Transcribe request received: audio_content={len(request.audio_content)} bytes"
+            )
+
+            # Validate audio content is not empty
+            if len(request.audio_content) == 0:
+                logger.error("Transcribe: audio_content is empty")
+                context.abort(grpc.StatusCode.INVALID_ARGUMENT, "audio_content is empty")
+        else:
+            logger.error("Transcribe: neither file_path nor audio_content provided")
+            context.abort(
+                grpc.StatusCode.INVALID_ARGUMENT, "Either file_path or audio_content is required"
+            )
 
         # Log request details
         task_type = request.task_type if request.task_type else "transcribe"
@@ -239,9 +255,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     options.custom_regroup = request.options.custom_regroup
 
             # Perform transcription
-            logger.info(f"Starting transcription for: {request.file_path}")
+            logger.info(f"Starting transcription (source_type={source_type})")
             result = self.engine.transcribe(
-                file_path=request.file_path,
+                source=source,
                 task_type=task_type,
                 force_language=request.force_language if request.force_language else None,
                 options=options,

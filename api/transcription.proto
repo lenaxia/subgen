@@ -24,20 +24,23 @@ service TranscriptionService {
 // ============================================================================
 
 message TranscribeRequest {
-  // File path on shared NFS (both orchestrator and worker can access)
-  string file_path = 1;
+  // File path or audio content
+  oneof audio_source {
+    string file_path = 1;      // File path on shared storage
+    bytes audio_content = 2;   // Audio content bytes (for ASR/Bazarr uploads)
+  }
   
   // Task type: "transcribe" or "translate"
-  string task_type = 2;
+  string task_type = 3;
   
   // Force language (ISO 639-1 code) or empty for auto-detect
-  string force_language = 3;
+  string force_language = 4;
   
   // Transcription options
-  TranscribeOptions options = 4;
+  TranscribeOptions options = 5;
   
   // Metadata for post-processing (optional)
-  map<string, string> metadata = 5;  // e.g., plex_item_id, jellyfin_item_id
+  map<string, string> metadata = 6;  // e.g., plex_item_id, jellyfin_item_id
 }
 
 message TranscribeOptions {

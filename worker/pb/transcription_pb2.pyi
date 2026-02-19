@@ -8,7 +8,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class TranscribeRequest(_message.Message):
-    __slots__ = ("file_path", "task_type", "force_language", "options", "metadata")
+    __slots__ = ("file_path", "audio_content", "task_type", "force_language", "options", "metadata")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -17,19 +17,28 @@ class TranscribeRequest(_message.Message):
         value: str
         def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     FILE_PATH_FIELD_NUMBER: _ClassVar[int]
+    AUDIO_CONTENT_FIELD_NUMBER: _ClassVar[int]
     TASK_TYPE_FIELD_NUMBER: _ClassVar[int]
     FORCE_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
     file_path: str
+    audio_content: bytes
     task_type: str
     force_language: str
     options: TranscribeOptions
     metadata: _containers.ScalarMap[str, str]
-    def __init__(self, file_path: _Optional[str] = ..., task_type: _Optional[str] = ..., force_language: _Optional[str] = ..., options: _Optional[_Union[TranscribeOptions, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    def __init__(self, file_path: _Optional[str] = ..., audio_content: _Optional[bytes] = ..., task_type: _Optional[str] = ..., force_language: _Optional[str] = ..., options: _Optional[_Union[TranscribeOptions, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
 
 class TranscribeOptions(_message.Message):
-    __slots__ = ("whisper_model", "whisper_threads", "word_level_highlight", "custom_regroup", "lrc_for_audio", "custom_prompt", "append_footer", "subtitle_language_name", "show_model_in_filename", "show_subgen_in_filename")
+    __slots__ = ("whisper_model", "whisper_threads", "word_level_highlight", "custom_regroup", "lrc_for_audio", "custom_prompt", "append_footer", "subtitle_language_name", "show_model_in_filename", "show_subgen_in_filename", "use_prompt", "extra_kwargs", "device", "compute_type")
+    class ExtraKwargsEntry(_message.Message):
+        __slots__ = ("key", "value")
+        KEY_FIELD_NUMBER: _ClassVar[int]
+        VALUE_FIELD_NUMBER: _ClassVar[int]
+        key: str
+        value: str
+        def __init__(self, key: _Optional[str] = ..., value: _Optional[str] = ...) -> None: ...
     WHISPER_MODEL_FIELD_NUMBER: _ClassVar[int]
     WHISPER_THREADS_FIELD_NUMBER: _ClassVar[int]
     WORD_LEVEL_HIGHLIGHT_FIELD_NUMBER: _ClassVar[int]
@@ -40,6 +49,10 @@ class TranscribeOptions(_message.Message):
     SUBTITLE_LANGUAGE_NAME_FIELD_NUMBER: _ClassVar[int]
     SHOW_MODEL_IN_FILENAME_FIELD_NUMBER: _ClassVar[int]
     SHOW_SUBGEN_IN_FILENAME_FIELD_NUMBER: _ClassVar[int]
+    USE_PROMPT_FIELD_NUMBER: _ClassVar[int]
+    EXTRA_KWARGS_FIELD_NUMBER: _ClassVar[int]
+    DEVICE_FIELD_NUMBER: _ClassVar[int]
+    COMPUTE_TYPE_FIELD_NUMBER: _ClassVar[int]
     whisper_model: str
     whisper_threads: int
     word_level_highlight: bool
@@ -50,7 +63,11 @@ class TranscribeOptions(_message.Message):
     subtitle_language_name: str
     show_model_in_filename: bool
     show_subgen_in_filename: bool
-    def __init__(self, whisper_model: _Optional[str] = ..., whisper_threads: _Optional[int] = ..., word_level_highlight: bool = ..., custom_regroup: _Optional[str] = ..., lrc_for_audio: bool = ..., custom_prompt: _Optional[str] = ..., append_footer: bool = ..., subtitle_language_name: _Optional[str] = ..., show_model_in_filename: bool = ..., show_subgen_in_filename: bool = ...) -> None: ...
+    use_prompt: bool
+    extra_kwargs: _containers.ScalarMap[str, str]
+    device: str
+    compute_type: str
+    def __init__(self, whisper_model: _Optional[str] = ..., whisper_threads: _Optional[int] = ..., word_level_highlight: bool = ..., custom_regroup: _Optional[str] = ..., lrc_for_audio: bool = ..., custom_prompt: _Optional[str] = ..., append_footer: bool = ..., subtitle_language_name: _Optional[str] = ..., show_model_in_filename: bool = ..., show_subgen_in_filename: bool = ..., use_prompt: bool = ..., extra_kwargs: _Optional[_Mapping[str, str]] = ..., device: _Optional[str] = ..., compute_type: _Optional[str] = ...) -> None: ...
 
 class TranscribeResponse(_message.Message):
     __slots__ = ("success", "subtitle_path", "detected_language", "error_message", "stats")
