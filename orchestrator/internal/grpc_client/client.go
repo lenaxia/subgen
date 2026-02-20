@@ -235,7 +235,7 @@ func (c *Client) detectLanguageWithClient(ctx context.Context, client pb.Transcr
 		return nil, fmt.Errorf("neither file path nor audio content provided")
 	}
 
-	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	ctx, cancel := context.WithTimeout(ctx, 120*time.Second)
 	defer cancel()
 
 	resp, err := client.DetectLanguage(ctx, req)
