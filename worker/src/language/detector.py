@@ -104,8 +104,22 @@ def detect_language_from_bytes(
     Raises:
         LanguageDetectionError: If detection fails
     """
+    import tempfile
+    import os
+
+    temp_file = None
     try:
-        result = model.transcribe(audio_bytes)
+        # Write bytes to temp file (same approach as engine.transcribe)
+        temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+        temp_file.write(audio_bytes)
+        temp_file.close()
+        file_path = temp_file.name
+        logger.debug(
+            f"Written {len(audio_bytes)} bytes to temp file for language detection: {file_path}"
+        )
+
+        # Use the file path version for detection
+        result = model.transcribe(file_path, beam_size=5)
         detected_lang = LanguageCode.from_name(result.language)
 
         return LanguageDetectionResult(
@@ -117,6 +131,14 @@ def detect_language_from_bytes(
     except Exception as e:
         logger.error(f"Language detection failed: {e}", exc_info=True)
         raise LanguageDetectionError(f"Failed to detect language: {e}")
+    finally:
+        # Clean up temp file
+        if temp_file and os.path.exists(temp_file.name):
+            try:
+                os.unlink(temp_file.name)
+                logger.debug(f"Cleaned up temp file: {temp_file.name}")
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up temp file {temp_file.name}: {cleanup_error}")
 
 
 def choose_transcription_language(
