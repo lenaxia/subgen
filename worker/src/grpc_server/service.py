@@ -165,6 +165,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             return transcription_pb2.DetectLanguageResponse(
                 success=True,
                 language_code=detection_result.language_code,
+                language_name=detection_result.language_name,
                 confidence=detection_result.confidence,
             )
 
