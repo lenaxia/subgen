@@ -91,11 +91,22 @@ message TranscribeOptions {
   string compute_type = 14;
 }
 
+message SubtitleSegment {
+  // Start time in seconds
+  float start = 1;
+  
+  // End time in seconds
+  float end = 2;
+  
+  // Text content
+  string text = 3;
+}
+
 message TranscribeResponse {
   // Success flag
   bool success = 1;
   
-  // Subtitle file path (where it was written)
+  // Subtitle file path (where it was written) - for file-based workflows
   string subtitle_path = 2;
   
   // Detected language (ISO 639-1 code)
@@ -106,6 +117,9 @@ message TranscribeResponse {
   
   // Transcription statistics
   TranscriptionStats stats = 5;
+  
+  // Subtitle segments - for ASR/API responses
+  repeated SubtitleSegment segments = 6;
 }
 
 message TranscriptionStats {

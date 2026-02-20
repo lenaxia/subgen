@@ -9,7 +9,7 @@ import os
 import logging
 import sys
 import time
-from typing import Optional, Any
+from typing import Optional, Any, List
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -64,6 +64,7 @@ class TranscriptionResult:
     segment_count: int = 0
     transcription_time_ms: int = 0
     peak_memory_mb: int = 0
+    segments: Optional[List[Any]] = None  # Whisper segments
 
 
 class TranscriptionEngine:
@@ -225,6 +226,7 @@ class TranscriptionEngine:
                 duration_seconds=duration,
                 segment_count=len(result.segments),
                 transcription_time_ms=int(duration * 1000),
+                segments=result.segments,
             )
 
         except Exception as e:

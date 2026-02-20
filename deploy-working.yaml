@@ -57,7 +57,7 @@ data:
   LOG_FORMAT: "json"
   
   # Whisper model configuration
-  WHISPER_MODEL: "medium"  # Options: tiny, base, small, medium, large, large-v3
+  WHISPER_MODEL: "small"  # Options: tiny, base, small, medium, large, large-v3
   WHISPER_THREADS: "4"
   TRANSCRIBE_DEVICE: "cpu"  # Options: cpu, cuda
   COMPUTE_TYPE: "auto"  # Options: int8, int8_float16, float16, float32, auto
@@ -150,7 +150,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: orchestrator
-        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.7
+        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.8
         imagePullPolicy: Always
         env:
         - name: DEBUG
@@ -196,7 +196,9 @@ spec:
       - name: temp
         emptyDir: {}
       - name: media
-        emptyDir: {}
+        nfs:
+          server: 192.168.0.120
+          path: /volume2/downloads/[Plex Temp Library]
 ---
 apiVersion: apps/v1
 kind: StatefulSet
@@ -225,7 +227,7 @@ spec:
         runAsGroup: 0
       containers:
       - name: worker
-        image: ghcr.io/lenaxia/subgen-worker:v0.2.7-cpu
+        image: ghcr.io/lenaxia/subgen-worker:v0.2.8-cpu
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
@@ -255,10 +257,10 @@ spec:
           failureThreshold: 30
         resources:
           requests:
-            memory: "1Gi"
+            memory: "2Gi"
             cpu: "500m"
           limits:
-            memory: "2Gi"
+            memory: "4Gi"
             cpu: "1000m"
         volumeMounts:
         - mountPath: /models
@@ -269,7 +271,9 @@ spec:
       - name: models
         emptyDir: {}
       - name: media
-        emptyDir: {}
+        nfs:
+          server: 192.168.0.120
+          path: /volume2/downloads/[Plex Temp Library]
 ---
 apiVersion: v1
 kind: Service

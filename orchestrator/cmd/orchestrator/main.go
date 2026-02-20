@@ -626,17 +626,31 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		"detected_language": resp.DetectedLanguage,
 	}).Info("Transcription completed successfully")
 
-	// Parse segments from generated subtitle file if result channel is present
+	// Get segments from response or parse from file
 	var segments []queue.Segment
-	if task.ResultChan != nil && resp.SubtitlePath != "" {
-		// Read the subtitle file and parse segments
-		parsedSegments, parseErr := td.parseSubtitleFile(resp.SubtitlePath)
-		if parseErr != nil {
-			td.log.WithError(parseErr).Warn("Failed to parse subtitle file for result channel")
-			// Continue with empty segments rather than failing
-		} else {
-			segments = parsedSegments
-			td.log.WithField("segment_count", len(segments)).Debug("Parsed segments from subtitle file")
+	if task.ResultChan != nil {
+		// Prefer segments from response (for ASR/bytes input)
+		if len(resp.Segments) > 0 {
+			// Convert protobuf segments to queue segments
+			for _, pbSegment := range resp.Segments {
+				segment := queue.Segment{
+					Start: float64(pbSegment.Start),
+					End:   float64(pbSegment.End),
+					Text:  pbSegment.Text,
+				}
+				segments = append(segments, segment)
+			}
+			td.log.WithField("segment_count", len(segments)).Debug("Using segments from response")
+		} else if resp.SubtitlePath != "" {
+			// Fallback: Read the subtitle file (for file-based workflows with shared storage)
+			parsedSegments, parseErr := td.parseSubtitleFile(resp.SubtitlePath)
+			if parseErr != nil {
+				td.log.WithError(parseErr).Warn("Failed to parse subtitle file for result channel")
+				// Continue with empty segments rather than failing
+			} else {
+				segments = parsedSegments
+				td.log.WithField("segment_count", len(segments)).Debug("Parsed segments from subtitle file")
+			}
 		}
 	}
 

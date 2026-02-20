@@ -285,11 +285,21 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     peak_memory_mb=result.peak_memory_mb,
                 )
 
+                # Convert segments to protobuf format
+                segments = []
+                if result.segments:
+                    for segment in result.segments:
+                        pb_segment = transcription_pb2.SubtitleSegment(
+                            start=segment.start, end=segment.end, text=segment.text
+                        )
+                        segments.append(pb_segment)
+
                 return transcription_pb2.TranscribeResponse(
                     success=True,
                     subtitle_path=result.subtitle_path,
                     detected_language=result.detected_language,
                     stats=stats,
+                    segments=segments,
                 )
             else:
                 # Track failure
