@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
@@ -271,7 +272,12 @@ func TestMonitor_Integration_StartupScan(t *testing.T) {
 	// Create scanner (no skip checker for this test)
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
-	scanner := monitor.NewScannerWithLogger(nil, nil, log)
+	cfg := &config.Config{
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
+	}
+	scanner := monitor.NewScannerWithLogger(nil, nil, log, cfg)
 
 	// Scan directory
 	result, err := scanner.ScanDirectory(tmpDir, true, "en")

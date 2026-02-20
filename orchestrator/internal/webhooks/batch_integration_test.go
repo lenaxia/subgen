@@ -34,6 +34,15 @@ func (msc *mockSkipChecker) GetConfig() *skip.Config {
 	return nil
 }
 
+// createTestConfig creates a test configuration
+func createTestConfig() *config.Config {
+	return &config.Config{
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
+	}
+}
+
 // mockMonitorQueue implements monitor.QueueInterface for testing
 type mockMonitorQueue struct {
 	enqueuedTasks []interface{}
@@ -76,6 +85,9 @@ func TestBatchEndpointIntegration(t *testing.T) {
 	// Setup server with real scanner (no skip checker for this test)
 	cfg := &config.Config{
 		WebhookPort: 9000,
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
 	}
 	queue := &MockQueue{}
 	log := logrus.New()
@@ -85,7 +97,7 @@ func TestBatchEndpointIntegration(t *testing.T) {
 
 	// Create scanner with mockMonitorQueue
 	monitorQueue := &mockMonitorQueue{}
-	scanner := monitor.NewScanner(monitorQueue, nil) // No skip checker
+	scanner := monitor.NewScanner(monitorQueue, nil, cfg) // No skip checker
 	server.SetScanner(scanner)
 
 	// Test 1: Non-recursive scan
@@ -155,6 +167,9 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 	// Setup server
 	cfg := &config.Config{
 		WebhookPort: 9000,
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
 	}
 	queue := &MockQueue{}
 	log := logrus.New()
@@ -168,7 +183,7 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 		shouldSkip: true, // Skip all files
 		skipReason: skip.ReasonSubtitleExists,
 	}
-	scanner := monitor.NewScanner(monitorQueue, skipChecker)
+	scanner := monitor.NewScanner(monitorQueue, skipChecker, cfg)
 	server.SetScanner(scanner)
 
 	// Execute batch scan
@@ -192,7 +207,12 @@ func TestBatchEndpointWithSkipLogic(t *testing.T) {
 
 // TestBatchEndpointErrorCases tests various error scenarios
 func TestBatchEndpointErrorCases(t *testing.T) {
-	cfg := &config.Config{WebhookPort: 9000}
+	cfg := &config.Config{
+		WebhookPort: 9000,
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
+	}
 	queue := &MockQueue{}
 	log := logrus.New()
 	log.SetLevel(logrus.ErrorLevel)
@@ -201,7 +221,7 @@ func TestBatchEndpointErrorCases(t *testing.T) {
 
 	// Create scanner for tests that need it
 	monitorQueue := &mockMonitorQueue{}
-	scanner := monitor.NewScanner(monitorQueue, nil)
+	scanner := monitor.NewScanner(monitorQueue, nil, cfg)
 	server.SetScanner(scanner)
 
 	t.Run("NonexistentDirectory", func(t *testing.T) {

@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/sirupsen/logrus"
 )
@@ -31,7 +32,12 @@ func BenchmarkScanner_10000Files(b *testing.B) {
 	}
 
 	// Create scanner (no queue/skip checker for benchmark)
-	scanner := monitor.NewScanner(nil, nil)
+	cfg := &config.Config{
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
+	}
+	scanner := monitor.NewScanner(nil, nil, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -63,7 +69,12 @@ func BenchmarkScanner_1000Files(b *testing.B) {
 	}
 
 	// Create scanner
-	scanner := monitor.NewScanner(nil, nil)
+	cfg := &config.Config{
+		Monitor: config.MonitorConfig{
+			BatchScanLimit: 0,
+		},
+	}
+	scanner := monitor.NewScanner(nil, nil, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
