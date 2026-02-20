@@ -24,16 +24,13 @@ COPY language_code.py ./
 # Set Python path - include pb directory for protobuf imports
 ENV PYTHONPATH=/app/src:/app:/app/pb
 
-# Health check
+# Health check (HTTP on port 8080)
 HEALTHCHECK --interval=30s --timeout=5s --start-period=10s --retries=3 \
-    CMD python -c "import grpc; from pb import transcription_pb2, transcription_pb2_grpc; \
-    channel = grpc.insecure_channel('localhost:50051'); \
-    stub = transcription_pb2_grpc.TranscriptionServiceStub(channel); \
-    response = stub.HealthCheck(transcription_pb2.HealthCheckRequest()); \
-    exit(0 if response.status == 1 else 1)"
+    CMD curl -f http://localhost:8080/healthz || exit 1
 
-# Expose gRPC port
-EXPOSE 50051
+# Expose ports
+EXPOSE 50051  # gRPC for work
+EXPOSE 8080   # HTTP for health checks
 
 # Run as non-root user
 RUN useradd -m -u 1000 worker
