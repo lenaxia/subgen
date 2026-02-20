@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"strconv"
 	"strings"
 	"time"
 
@@ -36,7 +37,7 @@ type QueueInterface interface {
 
 // GRPCClientInterface defines the interface for gRPC worker communication
 type GRPCClientInterface interface {
-	DetectLanguage(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error)
+	DetectLanguage(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error)
 }
 
 // WorkerPoolInterface defines the interface for worker pool
@@ -750,11 +751,20 @@ func (s *Server) handleTautulli(c *fiber.Ctx) error {
 
 // handleASR processes direct audio transcription requests (for Bazarr integration)
 func (s *Server) handleASR(c *fiber.Ctx) error {
-	// Parse query parameters
-	taskType := c.Query("task", "transcribe")
-	language := c.Query("language", "")
-	videoFile := c.Query("video_file", "")
-	output := c.Query("output", "srt")
+	// Parse parameters (can be query params or form values)
+	taskType := c.FormValue("task", c.Query("task", "transcribe"))
+	language := c.FormValue("language", c.Query("language", ""))
+	videoFile := c.FormValue("video_file", c.Query("video_file", ""))
+	output := c.FormValue("output", c.Query("output", "srt"))
+
+	// Parse form data for ASR options
+	wordLevelHighlight := c.FormValue("word_level_highlight", "false") == "true"
+	customRegroup := c.FormValue("custom_regroup", "")
+	customPrompt := c.FormValue("custom_prompt", "")
+	appendFooter := c.FormValue("append_footer", "false") == "true"
+	subtitleLanguageName := c.FormValue("subtitle_language_name", "")
+	showModelInFilename := c.FormValue("show_model_in_filename", "true") == "true"
+	showSubgenInFilename := c.FormValue("show_subgen_in_filename", "true") == "true"
 
 	// STORY_05: Normalize format to lowercase for case-insensitive comparison
 	output = strings.ToLower(strings.TrimSpace(output))
@@ -861,7 +871,14 @@ func (s *Server) handleASR(c *fiber.Ctx) error {
 		ForceLanguage:     language,
 		AudioContent:      audioContent,
 		ASROptions: map[string]string{
-			"output": output,
+			"output":                  output,
+			"word_level_highlight":    strconv.FormatBool(wordLevelHighlight),
+			"custom_regroup":          customRegroup,
+			"custom_prompt":           customPrompt,
+			"append_footer":           strconv.FormatBool(appendFooter),
+			"subtitle_language_name":  subtitleLanguageName,
+			"show_model_in_filename":  strconv.FormatBool(showModelInFilename),
+			"show_subgen_in_filename": strconv.FormatBool(showSubgenInFilename),
 		},
 		ResultChan: resultChan, // Enable blocking
 	}

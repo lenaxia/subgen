@@ -3,8 +3,6 @@ package webhooks
 import (
 	"context"
 	"fmt"
-	"io"
-	"os"
 	"strconv"
 	"time"
 
@@ -99,35 +97,16 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 	}
 	defer src.Close()
 
-	// Create temporary file in system temp directory
-	// In production with Docker, ensure /tmp is shared between orchestrator and worker
-	tmpFile, err := os.CreateTemp("", "detect-*.tmp")
-	if err != nil {
+	// Read audio content (orchestrator should not store files, pass content directly)
+	audioContent := make([]byte, file.Size)
+	n, err := src.Read(audioContent)
+	if err != nil && n == 0 {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Status: "error",
-			Error:  fmt.Sprintf("failed to create temp file: %v", err),
+			Error:  fmt.Sprintf("failed to read audio file: %v", err),
 		})
 	}
-	tmpPath := tmpFile.Name()
-	defer os.Remove(tmpPath) // Clean up
-
-	// Copy uploaded file to temp file
-	if _, err := io.Copy(tmpFile, src); err != nil {
-		tmpFile.Close()
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Status: "error",
-			Error:  fmt.Sprintf("failed to save uploaded file: %v", err),
-		})
-	}
-	tmpFile.Close()
-
-	// Set world-readable permissions so worker container can access file
-	if err := os.Chmod(tmpPath, 0644); err != nil {
-		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
-			Status: "error",
-			Error:  fmt.Sprintf("failed to set file permissions: %v", err),
-		})
-	}
+	audioContent = audioContent[:n]
 
 	// Select a worker
 	if s.workerPool == nil {
@@ -145,7 +124,7 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 		})
 	}
 
-	// Call worker's DetectLanguage RPC
+	// Call worker's DetectLanguage RPC with audio content
 	if s.grpcClient == nil {
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{
 			Status: "error",
@@ -163,7 +142,8 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 		"worker_addr": worker.Address,
 	}).Info("Detecting language")
 
-	resp, err := s.grpcClient.DetectLanguage(ctx, worker.Address, tmpPath, offset, length)
+	// Pass audio content directly via gRPC (orchestrator should not store files)
+	resp, err := s.grpcClient.DetectLanguage(ctx, worker.Address, "", audioContent, offset, length)
 	if err != nil {
 		s.log.WithError(err).Error("Language detection failed")
 		return c.Status(fiber.StatusInternalServerError).JSON(ErrorResponse{

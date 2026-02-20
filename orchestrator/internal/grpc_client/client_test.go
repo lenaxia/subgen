@@ -248,7 +248,7 @@ func TestDetectLanguage_Success(t *testing.T) {
 	// Mock gRPC client
 	mockClient := &mockTranscriptionClient{
 		detectLanguageFunc: func(ctx context.Context, in *pb.DetectLanguageRequest, opts ...grpc.CallOption) (*pb.DetectLanguageResponse, error) {
-			assert.Equal(t, "/path/to/audio.mp3", in.GetFilePath())
+			assert.Equal(t, []byte("test audio"), in.GetAudioContent())
 			assert.Equal(t, int32(30), in.SampleLength)
 
 			return &pb.DetectLanguageResponse{
@@ -262,7 +262,7 @@ func TestDetectLanguage_Success(t *testing.T) {
 
 	// Test
 	ctx := context.Background()
-	resp, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/audio.mp3", 0.0, 30.0)
+	resp, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/audio.mp3", []byte("test audio"), 0.0, 30.0)
 
 	// Verify
 	require.NoError(t, err)
@@ -289,7 +289,7 @@ func TestDetectLanguage_Failure(t *testing.T) {
 
 	// Test
 	ctx := context.Background()
-	_, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/invalid.mp3", 0.0, 30.0)
+	_, err := client.detectLanguageWithClient(ctx, mockClient, "/path/to/invalid.mp3", []byte("test audio"), 0.0, 30.0)
 
 	// Verify
 	require.Error(t, err)

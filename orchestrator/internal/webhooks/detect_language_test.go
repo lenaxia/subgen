@@ -9,7 +9,6 @@ import (
 	"io"
 	"mime/multipart"
 	"net/http/httptest"
-	"os"
 	"testing"
 
 	"github.com/gofiber/fiber/v2"
@@ -22,12 +21,12 @@ import (
 
 // MockGRPCClient is a simple mock for testing
 type MockGRPCClient struct {
-	DetectLanguageFunc func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error)
+	DetectLanguageFunc func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error)
 }
 
-func (m *MockGRPCClient) DetectLanguage(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+func (m *MockGRPCClient) DetectLanguage(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 	if m.DetectLanguageFunc != nil {
-		return m.DetectLanguageFunc(ctx, workerAddr, filePath, offset, length)
+		return m.DetectLanguageFunc(ctx, workerAddr, filePath, audioContent, offset, length)
 	}
 	return &pb.DetectLanguageResponse{
 		LanguageName: "English",
@@ -82,13 +81,12 @@ func createTestServerWithMocks(grpcClient GRPCClientInterface, workerPool Worker
 // TestHandleDetectLanguage_Success tests the happy path
 func TestHandleDetectLanguage_Success(t *testing.T) {
 	mockClient := &MockGRPCClient{
-		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 			assert.Equal(t, "worker1:50051", workerAddr)
 			assert.Equal(t, 0.0, offset)
 			assert.Equal(t, 30.0, length)
-			// Verify temp file exists
-			_, err := os.Stat(filePath)
-			assert.NoError(t, err)
+			// Verify audio content is passed (not file path)
+			assert.Equal(t, []byte("fake audio data for testing"), audioContent)
 
 			return &pb.DetectLanguageResponse{
 				LanguageName: "English",
@@ -245,7 +243,7 @@ func TestHandleDetectLanguage_InvalidLength(t *testing.T) {
 // TestHandleDetectLanguage_WorkerError tests error when worker returns error
 func TestHandleDetectLanguage_WorkerError(t *testing.T) {
 	mockClient := &MockGRPCClient{
-		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 			return nil, errors.New("invalid audio format")
 		},
 	}
@@ -319,14 +317,13 @@ func TestHandleDetectLanguage_NoWorkerAvailable(t *testing.T) {
 
 // TestHandleDetectLanguage_TempFileCleanup verifies temp files are cleaned up
 func TestHandleDetectLanguage_TempFileCleanup(t *testing.T) {
-	var capturedFilePath string
+	var capturedAudioContent []byte
 
 	mockClient := &MockGRPCClient{
-		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
-			capturedFilePath = filePath
-			// Verify file exists during RPC call
-			_, err := os.Stat(capturedFilePath)
-			assert.NoError(t, err, "temp file should exist during RPC call")
+		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+			capturedAudioContent = audioContent
+			// Verify audio content is passed (not file path)
+			assert.Equal(t, []byte("fake audio data"), audioContent, "audio content should be passed directly")
 
 			return &pb.DetectLanguageResponse{
 				LanguageName: "English",
@@ -358,15 +355,15 @@ func TestHandleDetectLanguage_TempFileCleanup(t *testing.T) {
 	require.NoError(t, err)
 	defer resp.Body.Close()
 
-	// Verify file was cleaned up after request
-	_, err = os.Stat(capturedFilePath)
-	assert.True(t, os.IsNotExist(err), "temp file should be deleted after request")
+	// Verify audio content was captured
+	assert.NotNil(t, capturedAudioContent, "audio content should have been captured")
+	assert.Equal(t, []byte("fake audio data"), capturedAudioContent, "audio content should match uploaded data")
 }
 
 // TestHandleDetectLanguage_DefaultParameters tests default offset and length
 func TestHandleDetectLanguage_DefaultParameters(t *testing.T) {
 	mockClient := &MockGRPCClient{
-		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 			// Verify defaults are used
 			assert.Equal(t, 0.0, offset, "default offset should be 0")
 			assert.Equal(t, 30.0, length, "default length should be 30")
@@ -408,7 +405,7 @@ func TestHandleDetectLanguage_DefaultParameters(t *testing.T) {
 // TestHandleDetectLanguage_CustomParameters tests custom offset and length
 func TestHandleDetectLanguage_CustomParameters(t *testing.T) {
 	mockClient := &MockGRPCClient{
-		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+		DetectLanguageFunc: func(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 			// Verify custom values are used
 			assert.Equal(t, 10.0, offset)
 			assert.Equal(t, 15.0, length)

@@ -3,6 +3,7 @@ package grpc_client
 import (
 	"context"
 	"fmt"
+	"strconv"
 	"time"
 
 	"github.com/sirupsen/logrus"
@@ -61,7 +62,8 @@ func (c *Client) Transcribe(ctx context.Context, workerAddr string, task *queue.
 }
 
 // DetectLanguage detects language from audio file with customizable sample parameters
-func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+// Accepts either filePath (for media files on shared storage) or audioContent (for uploaded files)
+func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 	conn, err := c.pool.Get(ctx, workerAddr)
 	if err != nil {
 		return nil, fmt.Errorf("failed to get connection: %w", err)
@@ -69,7 +71,7 @@ func (c *Client) DetectLanguage(ctx context.Context, workerAddr string, filePath
 	defer c.pool.Put(workerAddr, conn)
 
 	client := pb.NewTranscriptionServiceClient(conn)
-	return c.detectLanguageWithClient(ctx, client, filePath, offset, length)
+	return c.detectLanguageWithClient(ctx, client, filePath, audioContent, offset, length)
 }
 
 // HealthCheck checks if a worker is healthy
@@ -102,6 +104,52 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 			WhisperThreads: c.getWhisperThreads(task),
 		},
 		Metadata: c.buildMetadata(task),
+	}
+
+	// Apply ASROptions if present
+	if task.ASROptions != nil {
+		// Word-level highlighting
+		if wordLevelHighlight, ok := task.ASROptions["word_level_highlight"]; ok {
+			if highlight, err := strconv.ParseBool(wordLevelHighlight); err == nil {
+				req.Options.WordLevelHighlight = highlight
+			}
+		}
+
+		// Custom regroup
+		if customRegroup, ok := task.ASROptions["custom_regroup"]; ok && customRegroup != "" {
+			req.Options.CustomRegroup = customRegroup
+		}
+
+		// Custom prompt
+		if customPrompt, ok := task.ASROptions["custom_prompt"]; ok && customPrompt != "" {
+			req.Options.CustomPrompt = customPrompt
+		}
+
+		// Append footer
+		if appendFooter, ok := task.ASROptions["append_footer"]; ok {
+			if footer, err := strconv.ParseBool(appendFooter); err == nil {
+				req.Options.AppendFooter = footer
+			}
+		}
+
+		// Subtitle language name
+		if subtitleLang, ok := task.ASROptions["subtitle_language_name"]; ok && subtitleLang != "" {
+			req.Options.SubtitleLanguageName = subtitleLang
+		}
+
+		// Show model in filename
+		if showModel, ok := task.ASROptions["show_model_in_filename"]; ok {
+			if show, err := strconv.ParseBool(showModel); err == nil {
+				req.Options.ShowModelInFilename = show
+			}
+		}
+
+		// Show subgen in filename
+		if showSubgen, ok := task.ASROptions["show_subgen_in_filename"]; ok {
+			if show, err := strconv.ParseBool(showSubgen); err == nil {
+				req.Options.ShowSubgenInFilename = show
+			}
+		}
 	}
 
 	// Set audio source: either file_path or audio_content
@@ -163,19 +211,32 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 }
 
 // detectLanguageWithClient detects language from audio file (internal method for testing)
-func (c *Client) detectLanguageWithClient(ctx context.Context, client pb.TranscriptionServiceClient, filePath string, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
+// Supports both filePath (for media files) and audioContent (for uploaded files)
+func (c *Client) detectLanguageWithClient(ctx context.Context, client pb.TranscriptionServiceClient, filePath string, audioContent []byte, offset float64, length float64) (*pb.DetectLanguageResponse, error) {
 	req := &pb.DetectLanguageRequest{
-		AudioSource: &pb.DetectLanguageRequest_FilePath{
-			FilePath: filePath,
-		},
 		SampleLength: int32(length), // Convert float64 to int32
 		SampleOffset: int32(offset), // Convert float64 to int32
 	}
 
+	// Set audio source: either file_path or audio_content
+	if len(audioContent) > 0 {
+		// Uploaded audio content
+		req.AudioSource = &pb.DetectLanguageRequest_AudioContent{
+			AudioContent: audioContent,
+		}
+		c.log.WithField("audio_bytes", len(audioContent)).Debug("Sending audio content for language detection")
+	} else if filePath != "" {
+		// Media file on shared storage
+		req.AudioSource = &pb.DetectLanguageRequest_FilePath{
+			FilePath: filePath,
+		}
+		c.log.WithField("file_path", filePath).Debug("Detecting language from file")
+	} else {
+		return nil, fmt.Errorf("neither file path nor audio content provided")
+	}
+
 	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
 	defer cancel()
-
-	c.log.WithField("file_path", filePath).Debug("Detecting language")
 
 	resp, err := client.DetectLanguage(ctx, req)
 	if err != nil {
