@@ -144,8 +144,8 @@ func (d *KubernetesDiscovery) checkWorkerHealth(ctx context.Context, address str
 		Timeout: 5 * time.Second,
 	}
 
-	// Check readiness endpoint first
-	readyURL := fmt.Sprintf("http://%s/ready", httpAddress)
+	// Check readiness endpoint first (use Kubernetes standard /readyz)
+	readyURL := fmt.Sprintf("http://%s/readyz", httpAddress)
 	readyResp, err := client.Get(readyURL)
 	if err != nil {
 		d.log.WithFields(logrus.Fields{

@@ -59,6 +59,7 @@ def init_health_server(service: "TranscriptionService"):
 
 
 @app.route("/health", methods=["GET"])
+@app.route("/healthz", methods=["GET"])  # Kubernetes standard
 def health():
     """
     Liveness probe - is the worker alive?
@@ -73,6 +74,7 @@ def health():
 
 
 @app.route("/ready", methods=["GET"])
+@app.route("/readyz", methods=["GET"])  # Kubernetes standard
 def ready():
     """
     Readiness probe - can the worker accept new tasks?
