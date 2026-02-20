@@ -167,50 +167,40 @@ func (d *KubernetesDiscovery) checkWorkerHealth(ctx context.Context, address str
 		return false, 0
 	}
 
-	// Get active jobs count from metrics endpoint
-	metricsURL := fmt.Sprintf("http://%s/metrics", httpAddress)
-	metricsResp, err := client.Get(metricsURL)
-	if err != nil {
-		// Worker is healthy but we can't get job count
-		d.log.WithFields(logrus.Fields{
-			"address": address,
-			"error":   err,
-			"url":     metricsURL,
-		}).Debug("Failed to get worker metrics")
-		return true, 0
-	}
-	defer metricsResp.Body.Close()
-
-	// Parse metrics JSON
-	var metrics struct {
-		JobsActive int32 `json:"jobs_active"`
+	// Parse readyz response to get jobs_active
+	var readyData struct {
+		Status      string `json:"status"`
+		MemoryMB    int    `json:"memory_mb"`
+		JobsActive  int32  `json:"jobs_active"`
+		ModelLoaded bool   `json:"model_loaded"`
+		Uptime      int    `json:"uptime_seconds"`
 	}
 
-	body, err := io.ReadAll(metricsResp.Body)
+	body, err := io.ReadAll(readyResp.Body)
 	if err != nil {
 		d.log.WithFields(logrus.Fields{
 			"address": address,
 			"error":   err,
-		}).Debug("Failed to read metrics response")
+		}).Debug("Failed to read readyz response")
 		return true, 0
 	}
 
-	if err := json.Unmarshal(body, &metrics); err != nil {
+	if err := json.Unmarshal(body, &readyData); err != nil {
 		d.log.WithFields(logrus.Fields{
 			"address": address,
 			"error":   err,
 			"body":    string(body),
-		}).Debug("Failed to parse metrics JSON")
+		}).Debug("Failed to parse readyz JSON")
 		return true, 0
 	}
 
 	d.log.WithFields(logrus.Fields{
 		"address":     address,
 		"healthy":     true,
-		"active_jobs": metrics.JobsActive,
+		"active_jobs": readyData.JobsActive,
 	}).Debug("Worker health check completed")
 
-	return true, metrics.JobsActive
+	return true, readyData.JobsActive
 }
 
 // Watch monitors K8s endpoints for worker changes

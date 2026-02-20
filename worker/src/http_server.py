@@ -58,9 +58,8 @@ def init_health_server(service: "TranscriptionService"):
     logger.info("Health server initialized")
 
 
-@app.route("/health", methods=["GET"])
-@app.route("/healthz", methods=["GET"])  # Kubernetes standard
-def health():
+@app.route("/healthz", methods=["GET"])
+def healthz():
     """
     Liveness probe - is the worker alive?
 
@@ -73,9 +72,8 @@ def health():
     return jsonify({"status": "alive", "timestamp": int(time.time())}), 200
 
 
-@app.route("/ready", methods=["GET"])
-@app.route("/readyz", methods=["GET"])  # Kubernetes standard
-def ready():
+@app.route("/readyz", methods=["GET"])
+def readyz():
     """
     Readiness probe - can the worker accept new tasks?
 
