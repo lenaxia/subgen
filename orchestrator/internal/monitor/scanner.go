@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 
+	"github.com/mccloud/subgen/orchestrator/internal/config"
 	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/sirupsen/logrus"
 )
@@ -34,23 +35,26 @@ type BasicScanner struct {
 	queue       QueueInterface
 	skipChecker skip.Checker
 	log         *logrus.Logger
+	config      *config.Config
 }
 
 // NewScanner creates a new scanner instance
-func NewScanner(queue QueueInterface, skipChecker skip.Checker) Scanner {
+func NewScanner(queue QueueInterface, skipChecker skip.Checker, cfg *config.Config) Scanner {
 	return &BasicScanner{
 		queue:       queue,
 		skipChecker: skipChecker,
 		log:         nil, // Optional logger
+		config:      cfg,
 	}
 }
 
 // NewScannerWithLogger creates a new scanner instance with logger for progress logging
-func NewScannerWithLogger(queue QueueInterface, skipChecker skip.Checker, log *logrus.Logger) Scanner {
+func NewScannerWithLogger(queue QueueInterface, skipChecker skip.Checker, log *logrus.Logger, cfg *config.Config) Scanner {
 	return &BasicScanner{
 		queue:       queue,
 		skipChecker: skipChecker,
 		log:         log,
+		config:      cfg,
 	}
 }
 
@@ -111,6 +115,12 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 
 	ctx := context.Background()
 
+	// Get batch scan limit from config (0 means unlimited)
+	batchScanLimit := 0
+	if s.config != nil {
+		batchScanLimit = s.config.Monitor.BatchScanLimit
+	}
+
 	// Walk directory tree
 	walkFunc := func(path string, info os.FileInfo, err error) error {
 		if err != nil {
@@ -135,12 +145,24 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 		// Count as scanned
 		result.Scanned++
 
+		// Check batch scan limit (0 means unlimited)
+		if batchScanLimit > 0 && result.Scanned > batchScanLimit {
+			if s.log != nil {
+				s.log.WithFields(logrus.Fields{
+					"scanned": result.Scanned,
+					"limit":   batchScanLimit,
+				}).Warn("Batch scan limit reached, stopping scan")
+			}
+			return filepath.SkipAll // Stop scanning
+		}
+
 		// Progress logging every 100 files
 		if s.log != nil && result.Scanned%100 == 0 {
 			s.log.WithFields(logrus.Fields{
 				"scanned": result.Scanned,
 				"queued":  result.Queued,
 				"skipped": result.Skipped,
+				"limit":   batchScanLimit,
 			}).Infof("Scan progress: %d files scanned", result.Scanned)
 		}
 

@@ -105,7 +105,7 @@ func TestHandleDetectLanguage_Success(t *testing.T) {
 	audioData := []byte("fake audio data for testing")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test_audio.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test_audio.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -150,7 +150,7 @@ func TestHandleDetectLanguage_NoFile(t *testing.T) {
 
 	respBody, err := io.ReadAll(resp.Body)
 	require.NoError(t, err)
-	assert.Contains(t, string(respBody), "no file uploaded")
+	assert.Contains(t, string(respBody), "no audio_file uploaded")
 }
 
 // TestHandleDetectLanguage_InvalidOffset tests error for negative offset
@@ -161,7 +161,7 @@ func TestHandleDetectLanguage_InvalidOffset(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -217,7 +217,7 @@ func TestHandleDetectLanguage_InvalidLength(t *testing.T) {
 			audioData := []byte("fake audio data")
 			body := &bytes.Buffer{}
 			writer := multipart.NewWriter(body)
-			part, err := writer.CreateFormFile("file", "test.mp3")
+			part, err := writer.CreateFormFile("audio_file", "test.mp3")
 			require.NoError(t, err)
 			_, err = part.Write(audioData)
 			require.NoError(t, err)
@@ -257,7 +257,7 @@ func TestHandleDetectLanguage_WorkerError(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -294,7 +294,7 @@ func TestHandleDetectLanguage_NoWorkerAvailable(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -343,7 +343,7 @@ func TestHandleDetectLanguage_TempFileCleanup(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -386,7 +386,7 @@ func TestHandleDetectLanguage_DefaultParameters(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -428,7 +428,7 @@ func TestHandleDetectLanguage_CustomParameters(t *testing.T) {
 	audioData := []byte("fake audio data")
 	body := &bytes.Buffer{}
 	writer := multipart.NewWriter(body)
-	part, err := writer.CreateFormFile("file", "test.mp3")
+	part, err := writer.CreateFormFile("audio_file", "test.mp3")
 	require.NoError(t, err)
 	_, err = part.Write(audioData)
 	require.NoError(t, err)
@@ -479,7 +479,7 @@ func TestHandleDetectLanguage_InvalidParameterFormat(t *testing.T) {
 			audioData := []byte("fake audio data")
 			body := &bytes.Buffer{}
 			writer := multipart.NewWriter(body)
-			part, err := writer.CreateFormFile("file", "test.mp3")
+			part, err := writer.CreateFormFile("audio_file", "test.mp3")
 			require.NoError(t, err)
 			_, err = part.Write(audioData)
 			require.NoError(t, err)

@@ -73,11 +73,11 @@ func (s *Server) handleDetectLanguage(c *fiber.Ctx) error {
 	}
 
 	// Get uploaded file
-	file, err := c.FormFile("file")
+	file, err := c.FormFile("audio_file")
 	if err != nil {
 		return c.Status(fiber.StatusBadRequest).JSON(ErrorResponse{
 			Status: "error",
-			Error:  "no file uploaded or invalid multipart form",
+			Error:  "no audio_file uploaded or invalid multipart form",
 		})
 	}
 

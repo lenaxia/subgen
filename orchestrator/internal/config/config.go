@@ -119,6 +119,7 @@ type MonitorConfig struct {
 	StabilityChecks   int
 	StabilityWait     int // seconds
 	StabilityTimeout  int // seconds
+	BatchScanLimit    int // Maximum files to scan in batch mode (0 = unlimited)
 }
 
 type ASRConfig struct {
@@ -218,6 +219,7 @@ func Load() (*Config, error) {
 			StabilityChecks:   v.GetInt("FILE_STABILITY_CHECKS"),
 			StabilityWait:     v.GetInt("FILE_STABILITY_WAIT"),
 			StabilityTimeout:  v.GetInt("FILE_STABILITY_TIMEOUT"),
+			BatchScanLimit:    v.GetInt("BATCH_SCAN_LIMIT"),
 		},
 
 		ASR: ASRConfig{
@@ -308,6 +310,7 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("FILE_STABILITY_CHECKS", 3)
 	v.SetDefault("FILE_STABILITY_WAIT", 2)
 	v.SetDefault("FILE_STABILITY_TIMEOUT", 60)
+	v.SetDefault("BATCH_SCAN_LIMIT", 1000) // Default limit of 1000 files (0 = unlimited)
 
 	// ASR
 	v.SetDefault("ASR_TIMEOUT", 300) // 300 seconds (5 minutes) for longer audio files

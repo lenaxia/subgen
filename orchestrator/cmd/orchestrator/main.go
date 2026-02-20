@@ -317,7 +317,7 @@ func main() {
 		if err != nil {
 			log.WithError(err).Fatal("Failed to create skip checker")
 		}
-		scanner := monitor.NewScannerWithLogger(queueAdapter, skipChecker, log)
+		scanner := monitor.NewScannerWithLogger(queueAdapter, skipChecker, log, cfg)
 		webhookServer.SetScanner(scanner)
 
 		// Create callback for file watcher (NOW has access to skipChecker)
