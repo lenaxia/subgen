@@ -2,21 +2,20 @@ package discovery
 
 import (
 	"context"
+	"encoding/json"
 	"fmt"
+	"io"
+	"net/http"
 	"strings"
 	"time"
 
 	"github.com/sirupsen/logrus"
-	"google.golang.org/grpc"
-	"google.golang.org/grpc/credentials/insecure"
 	corev1 "k8s.io/api/core/v1"
 	k8sErrors "k8s.io/apimachinery/pkg/api/errors"
 	metav1 "k8s.io/apimachinery/pkg/apis/meta/v1"
 	"k8s.io/apimachinery/pkg/watch"
 	"k8s.io/client-go/kubernetes"
 	"k8s.io/client-go/rest"
-
-	pb "github.com/mccloud/subgen/orchestrator/pkg/pb"
 )
 
 // KubernetesDiscovery implements WorkerDiscovery for K8s worker pods
@@ -135,51 +134,83 @@ func (d *KubernetesDiscovery) GetWorkers(ctx context.Context) ([]Worker, error) 
 	return workers, nil
 }
 
-// checkWorkerHealth performs gRPC health check
+// checkWorkerHealth performs HTTP health check on worker's health endpoints
 func (d *KubernetesDiscovery) checkWorkerHealth(ctx context.Context, address string) (bool, int32) {
-	// Create timeout context for health check (5 seconds)
-	ctx, cancel := context.WithTimeout(ctx, 5*time.Second)
-	defer cancel()
+	// Change gRPC port (50051) to HTTP health port (8080)
+	httpAddress := strings.Replace(address, ":50051", ":8080", 1)
 
-	// Try to connect to worker
-	conn, err := grpc.DialContext(ctx, address,
-		grpc.WithTransportCredentials(insecure.NewCredentials()),
-		grpc.WithBlock(),
-	)
+	// Create HTTP client with timeout
+	client := &http.Client{
+		Timeout: 5 * time.Second,
+	}
+
+	// Check readiness endpoint first
+	readyURL := fmt.Sprintf("http://%s/ready", httpAddress)
+	readyResp, err := client.Get(readyURL)
 	if err != nil {
-		// Connection failed - worker unhealthy
 		d.log.WithFields(logrus.Fields{
 			"address": address,
 			"error":   err,
-		}).Debug("Worker health check failed (connection error)")
+			"url":     readyURL,
+		}).Debug("Worker health check failed (HTTP connection error)")
 		return false, 0
 	}
-	defer conn.Close()
+	defer readyResp.Body.Close()
 
-	// Call HealthCheck RPC
-	client := pb.NewTranscriptionServiceClient(conn)
-	resp, err := client.HealthCheck(ctx, &pb.HealthCheckRequest{})
+	// Worker is healthy if ready endpoint returns 200
+	if readyResp.StatusCode != http.StatusOK {
+		d.log.WithFields(logrus.Fields{
+			"address":    address,
+			"statusCode": readyResp.StatusCode,
+			"url":        readyURL,
+		}).Debug("Worker not ready")
+		return false, 0
+	}
+
+	// Get active jobs count from metrics endpoint
+	metricsURL := fmt.Sprintf("http://%s/metrics", httpAddress)
+	metricsResp, err := client.Get(metricsURL)
 	if err != nil {
-		// Health check RPC failed
+		// Worker is healthy but we can't get job count
 		d.log.WithFields(logrus.Fields{
 			"address": address,
 			"error":   err,
-		}).Debug("Worker health check failed (RPC error)")
-		return false, 0
+			"url":     metricsURL,
+		}).Debug("Failed to get worker metrics")
+		return true, 0
+	}
+	defer metricsResp.Body.Close()
+
+	// Parse metrics JSON
+	var metrics struct {
+		JobsActive int32 `json:"jobs_active"`
 	}
 
-	// Check response status
-	healthy := resp.Status == pb.HealthCheckResponse_HEALTHY
-	activeJobs := resp.JobsActive
+	body, err := io.ReadAll(metricsResp.Body)
+	if err != nil {
+		d.log.WithFields(logrus.Fields{
+			"address": address,
+			"error":   err,
+		}).Debug("Failed to read metrics response")
+		return true, 0
+	}
+
+	if err := json.Unmarshal(body, &metrics); err != nil {
+		d.log.WithFields(logrus.Fields{
+			"address": address,
+			"error":   err,
+			"body":    string(body),
+		}).Debug("Failed to parse metrics JSON")
+		return true, 0
+	}
 
 	d.log.WithFields(logrus.Fields{
 		"address":     address,
-		"status":      resp.Status,
-		"healthy":     healthy,
-		"active_jobs": activeJobs,
+		"healthy":     true,
+		"active_jobs": metrics.JobsActive,
 	}).Debug("Worker health check completed")
 
-	return healthy, activeJobs
+	return true, metrics.JobsActive
 }
 
 // Watch monitors K8s endpoints for worker changes
