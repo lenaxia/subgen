@@ -11,7 +11,7 @@ import (
 )
 
 const (
-	detectLanguageTimeout = 30 * time.Second
+	detectLanguageTimeout = 120 * time.Second
 	maxUploadSize         = 500 * 1024 * 1024 // 500MB
 )
 
