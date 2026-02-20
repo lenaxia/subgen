@@ -119,13 +119,17 @@ def detect_language_from_bytes(
         )
 
         # Use the file path version for detection
-        result = model.transcribe(file_path, beam_size=5)
-        detected_lang = LanguageCode.from_name(result.language)
+        segments_generator, info = model.transcribe(file_path, beam_size=5)
+
+        # Consume the generator to complete detection
+        _ = list(segments_generator)
+
+        detected_lang = LanguageCode.from_iso_639_1(info.language)
 
         return LanguageDetectionResult(
             language_code=detected_lang.to_iso_639_1(),
             language_name=detected_lang.to_name(),
-            confidence=1.0,
+            confidence=info.language_probability,
         )
 
     except Exception as e:
