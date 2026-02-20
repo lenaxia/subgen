@@ -70,7 +70,7 @@ func (x HealthCheckResponse_Status) Number() protoreflect.EnumNumber {
 
 // Deprecated: Use HealthCheckResponse_Status.Descriptor instead.
 func (HealthCheckResponse_Status) EnumDescriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{7, 0}
+	return file_transcription_proto_rawDescGZIP(), []int{8, 0}
 }
 
 type TranscribeRequest struct {
@@ -358,25 +358,90 @@ func (x *TranscribeOptions) GetComputeType() string {
 	return ""
 }
 
+type SubtitleSegment struct {
+	state protoimpl.MessageState `protogen:"open.v1"`
+	// Start time in seconds
+	Start float32 `protobuf:"fixed32,1,opt,name=start,proto3" json:"start,omitempty"`
+	// End time in seconds
+	End float32 `protobuf:"fixed32,2,opt,name=end,proto3" json:"end,omitempty"`
+	// Text content
+	Text          string `protobuf:"bytes,3,opt,name=text,proto3" json:"text,omitempty"`
+	unknownFields protoimpl.UnknownFields
+	sizeCache     protoimpl.SizeCache
+}
+
+func (x *SubtitleSegment) Reset() {
+	*x = SubtitleSegment{}
+	mi := &file_transcription_proto_msgTypes[2]
+	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+	ms.StoreMessageInfo(mi)
+}
+
+func (x *SubtitleSegment) String() string {
+	return protoimpl.X.MessageStringOf(x)
+}
+
+func (*SubtitleSegment) ProtoMessage() {}
+
+func (x *SubtitleSegment) ProtoReflect() protoreflect.Message {
+	mi := &file_transcription_proto_msgTypes[2]
+	if x != nil {
+		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
+		if ms.LoadMessageInfo() == nil {
+			ms.StoreMessageInfo(mi)
+		}
+		return ms
+	}
+	return mi.MessageOf(x)
+}
+
+// Deprecated: Use SubtitleSegment.ProtoReflect.Descriptor instead.
+func (*SubtitleSegment) Descriptor() ([]byte, []int) {
+	return file_transcription_proto_rawDescGZIP(), []int{2}
+}
+
+func (x *SubtitleSegment) GetStart() float32 {
+	if x != nil {
+		return x.Start
+	}
+	return 0
+}
+
+func (x *SubtitleSegment) GetEnd() float32 {
+	if x != nil {
+		return x.End
+	}
+	return 0
+}
+
+func (x *SubtitleSegment) GetText() string {
+	if x != nil {
+		return x.Text
+	}
+	return ""
+}
+
 type TranscribeResponse struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Success flag
 	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
-	// Subtitle file path (where it was written)
+	// Subtitle file path (where it was written) - for file-based workflows
 	SubtitlePath string `protobuf:"bytes,2,opt,name=subtitle_path,json=subtitlePath,proto3" json:"subtitle_path,omitempty"`
 	// Detected language (ISO 639-1 code)
 	DetectedLanguage string `protobuf:"bytes,3,opt,name=detected_language,json=detectedLanguage,proto3" json:"detected_language,omitempty"`
 	// Error message (if success=false)
 	ErrorMessage string `protobuf:"bytes,4,opt,name=error_message,json=errorMessage,proto3" json:"error_message,omitempty"`
 	// Transcription statistics
-	Stats         *TranscriptionStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
+	Stats *TranscriptionStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
+	// Subtitle segments - for ASR/API responses
+	Segments      []*SubtitleSegment `protobuf:"bytes,6,rep,name=segments,proto3" json:"segments,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
 
 func (x *TranscribeResponse) Reset() {
 	*x = TranscribeResponse{}
-	mi := &file_transcription_proto_msgTypes[2]
+	mi := &file_transcription_proto_msgTypes[3]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -388,7 +453,7 @@ func (x *TranscribeResponse) String() string {
 func (*TranscribeResponse) ProtoMessage() {}
 
 func (x *TranscribeResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[2]
+	mi := &file_transcription_proto_msgTypes[3]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -401,7 +466,7 @@ func (x *TranscribeResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscribeResponse.ProtoReflect.Descriptor instead.
 func (*TranscribeResponse) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{2}
+	return file_transcription_proto_rawDescGZIP(), []int{3}
 }
 
 func (x *TranscribeResponse) GetSuccess() bool {
@@ -439,6 +504,13 @@ func (x *TranscribeResponse) GetStats() *TranscriptionStats {
 	return nil
 }
 
+func (x *TranscribeResponse) GetSegments() []*SubtitleSegment {
+	if x != nil {
+		return x.Segments
+	}
+	return nil
+}
+
 type TranscriptionStats struct {
 	state protoimpl.MessageState `protogen:"open.v1"`
 	// Total duration in seconds
@@ -457,7 +529,7 @@ type TranscriptionStats struct {
 
 func (x *TranscriptionStats) Reset() {
 	*x = TranscriptionStats{}
-	mi := &file_transcription_proto_msgTypes[3]
+	mi := &file_transcription_proto_msgTypes[4]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -469,7 +541,7 @@ func (x *TranscriptionStats) String() string {
 func (*TranscriptionStats) ProtoMessage() {}
 
 func (x *TranscriptionStats) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[3]
+	mi := &file_transcription_proto_msgTypes[4]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -482,7 +554,7 @@ func (x *TranscriptionStats) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use TranscriptionStats.ProtoReflect.Descriptor instead.
 func (*TranscriptionStats) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{3}
+	return file_transcription_proto_rawDescGZIP(), []int{4}
 }
 
 func (x *TranscriptionStats) GetDurationSeconds() float32 {
@@ -539,7 +611,7 @@ type DetectLanguageRequest struct {
 
 func (x *DetectLanguageRequest) Reset() {
 	*x = DetectLanguageRequest{}
-	mi := &file_transcription_proto_msgTypes[4]
+	mi := &file_transcription_proto_msgTypes[5]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -551,7 +623,7 @@ func (x *DetectLanguageRequest) String() string {
 func (*DetectLanguageRequest) ProtoMessage() {}
 
 func (x *DetectLanguageRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[4]
+	mi := &file_transcription_proto_msgTypes[5]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -564,7 +636,7 @@ func (x *DetectLanguageRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectLanguageRequest.ProtoReflect.Descriptor instead.
 func (*DetectLanguageRequest) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{4}
+	return file_transcription_proto_rawDescGZIP(), []int{5}
 }
 
 func (x *DetectLanguageRequest) GetAudioSource() isDetectLanguageRequest_AudioSource {
@@ -640,7 +712,7 @@ type DetectLanguageResponse struct {
 
 func (x *DetectLanguageResponse) Reset() {
 	*x = DetectLanguageResponse{}
-	mi := &file_transcription_proto_msgTypes[5]
+	mi := &file_transcription_proto_msgTypes[6]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -652,7 +724,7 @@ func (x *DetectLanguageResponse) String() string {
 func (*DetectLanguageResponse) ProtoMessage() {}
 
 func (x *DetectLanguageResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[5]
+	mi := &file_transcription_proto_msgTypes[6]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -665,7 +737,7 @@ func (x *DetectLanguageResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use DetectLanguageResponse.ProtoReflect.Descriptor instead.
 func (*DetectLanguageResponse) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{5}
+	return file_transcription_proto_rawDescGZIP(), []int{6}
 }
 
 func (x *DetectLanguageResponse) GetSuccess() bool {
@@ -711,7 +783,7 @@ type HealthCheckRequest struct {
 
 func (x *HealthCheckRequest) Reset() {
 	*x = HealthCheckRequest{}
-	mi := &file_transcription_proto_msgTypes[6]
+	mi := &file_transcription_proto_msgTypes[7]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -723,7 +795,7 @@ func (x *HealthCheckRequest) String() string {
 func (*HealthCheckRequest) ProtoMessage() {}
 
 func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[6]
+	mi := &file_transcription_proto_msgTypes[7]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -736,7 +808,7 @@ func (x *HealthCheckRequest) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckRequest.ProtoReflect.Descriptor instead.
 func (*HealthCheckRequest) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{6}
+	return file_transcription_proto_rawDescGZIP(), []int{7}
 }
 
 type HealthCheckResponse struct {
@@ -761,7 +833,7 @@ type HealthCheckResponse struct {
 
 func (x *HealthCheckResponse) Reset() {
 	*x = HealthCheckResponse{}
-	mi := &file_transcription_proto_msgTypes[7]
+	mi := &file_transcription_proto_msgTypes[8]
 	ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 	ms.StoreMessageInfo(mi)
 }
@@ -773,7 +845,7 @@ func (x *HealthCheckResponse) String() string {
 func (*HealthCheckResponse) ProtoMessage() {}
 
 func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
-	mi := &file_transcription_proto_msgTypes[7]
+	mi := &file_transcription_proto_msgTypes[8]
 	if x != nil {
 		ms := protoimpl.X.MessageStateOf(protoimpl.Pointer(x))
 		if ms.LoadMessageInfo() == nil {
@@ -786,7 +858,7 @@ func (x *HealthCheckResponse) ProtoReflect() protoreflect.Message {
 
 // Deprecated: Use HealthCheckResponse.ProtoReflect.Descriptor instead.
 func (*HealthCheckResponse) Descriptor() ([]byte, []int) {
-	return file_transcription_proto_rawDescGZIP(), []int{7}
+	return file_transcription_proto_rawDescGZIP(), []int{8}
 }
 
 func (x *HealthCheckResponse) GetStatus() HealthCheckResponse_Status {
@@ -873,13 +945,18 @@ const file_transcription_proto_rawDesc = "" +
 	"\fcompute_type\x18\x0e \x01(\tR\vcomputeType\x1a>\n" +
 	"\x10ExtraKwargsEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
-	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"\xda\x01\n" +
+	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01\"M\n" +
+	"\x0fSubtitleSegment\x12\x14\n" +
+	"\x05start\x18\x01 \x01(\x02R\x05start\x12\x10\n" +
+	"\x03end\x18\x02 \x01(\x02R\x03end\x12\x12\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\x92\x02\n" +
 	"\x12TranscribeResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
 	"\rsubtitle_path\x18\x02 \x01(\tR\fsubtitlePath\x12+\n" +
 	"\x11detected_language\x18\x03 \x01(\tR\x10detectedLanguage\x12#\n" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x123\n" +
-	"\x05stats\x18\x05 \x01(\v2\x1d.subgen.v1.TranscriptionStatsR\x05stats\"\xeb\x01\n" +
+	"\x05stats\x18\x05 \x01(\v2\x1d.subgen.v1.TranscriptionStatsR\x05stats\x126\n" +
+	"\bsegments\x18\x06 \x03(\v2\x1a.subgen.v1.SubtitleSegmentR\bsegments\"\xeb\x01\n" +
 	"\x12TranscriptionStats\x12)\n" +
 	"\x10duration_seconds\x18\x01 \x01(\x02R\x0fdurationSeconds\x12#\n" +
 	"\rsegment_count\x18\x02 \x01(\x05R\fsegmentCount\x12+\n" +
@@ -919,7 +996,7 @@ const file_transcription_proto_rawDesc = "" +
 	"\n" +
 	"Transcribe\x12\x1c.subgen.v1.TranscribeRequest\x1a\x1d.subgen.v1.TranscribeResponse\x12U\n" +
 	"\x0eDetectLanguage\x12 .subgen.v1.DetectLanguageRequest\x1a!.subgen.v1.DetectLanguageResponse\x12L\n" +
-	"\vHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB/Z-github.com/mccloud/subgen/orchestrator/pkg/pbb\x06proto3"
+	"\vHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB2Z-github.com/mccloud/subgen/orchestrator/pkg/pb\x90\x01\x01b\x06proto3"
 
 var (
 	file_transcription_proto_rawDescOnce sync.Once
@@ -934,37 +1011,39 @@ func file_transcription_proto_rawDescGZIP() []byte {
 }
 
 var file_transcription_proto_enumTypes = make([]protoimpl.EnumInfo, 1)
-var file_transcription_proto_msgTypes = make([]protoimpl.MessageInfo, 10)
+var file_transcription_proto_msgTypes = make([]protoimpl.MessageInfo, 11)
 var file_transcription_proto_goTypes = []any{
 	(HealthCheckResponse_Status)(0), // 0: subgen.v1.HealthCheckResponse.Status
 	(*TranscribeRequest)(nil),       // 1: subgen.v1.TranscribeRequest
 	(*TranscribeOptions)(nil),       // 2: subgen.v1.TranscribeOptions
-	(*TranscribeResponse)(nil),      // 3: subgen.v1.TranscribeResponse
-	(*TranscriptionStats)(nil),      // 4: subgen.v1.TranscriptionStats
-	(*DetectLanguageRequest)(nil),   // 5: subgen.v1.DetectLanguageRequest
-	(*DetectLanguageResponse)(nil),  // 6: subgen.v1.DetectLanguageResponse
-	(*HealthCheckRequest)(nil),      // 7: subgen.v1.HealthCheckRequest
-	(*HealthCheckResponse)(nil),     // 8: subgen.v1.HealthCheckResponse
-	nil,                             // 9: subgen.v1.TranscribeRequest.MetadataEntry
-	nil,                             // 10: subgen.v1.TranscribeOptions.ExtraKwargsEntry
+	(*SubtitleSegment)(nil),         // 3: subgen.v1.SubtitleSegment
+	(*TranscribeResponse)(nil),      // 4: subgen.v1.TranscribeResponse
+	(*TranscriptionStats)(nil),      // 5: subgen.v1.TranscriptionStats
+	(*DetectLanguageRequest)(nil),   // 6: subgen.v1.DetectLanguageRequest
+	(*DetectLanguageResponse)(nil),  // 7: subgen.v1.DetectLanguageResponse
+	(*HealthCheckRequest)(nil),      // 8: subgen.v1.HealthCheckRequest
+	(*HealthCheckResponse)(nil),     // 9: subgen.v1.HealthCheckResponse
+	nil,                             // 10: subgen.v1.TranscribeRequest.MetadataEntry
+	nil,                             // 11: subgen.v1.TranscribeOptions.ExtraKwargsEntry
 }
 var file_transcription_proto_depIdxs = []int32{
 	2,  // 0: subgen.v1.TranscribeRequest.options:type_name -> subgen.v1.TranscribeOptions
-	9,  // 1: subgen.v1.TranscribeRequest.metadata:type_name -> subgen.v1.TranscribeRequest.MetadataEntry
-	10, // 2: subgen.v1.TranscribeOptions.extra_kwargs:type_name -> subgen.v1.TranscribeOptions.ExtraKwargsEntry
-	4,  // 3: subgen.v1.TranscribeResponse.stats:type_name -> subgen.v1.TranscriptionStats
-	0,  // 4: subgen.v1.HealthCheckResponse.status:type_name -> subgen.v1.HealthCheckResponse.Status
-	1,  // 5: subgen.v1.TranscriptionService.Transcribe:input_type -> subgen.v1.TranscribeRequest
-	5,  // 6: subgen.v1.TranscriptionService.DetectLanguage:input_type -> subgen.v1.DetectLanguageRequest
-	7,  // 7: subgen.v1.TranscriptionService.HealthCheck:input_type -> subgen.v1.HealthCheckRequest
-	3,  // 8: subgen.v1.TranscriptionService.Transcribe:output_type -> subgen.v1.TranscribeResponse
-	6,  // 9: subgen.v1.TranscriptionService.DetectLanguage:output_type -> subgen.v1.DetectLanguageResponse
-	8,  // 10: subgen.v1.TranscriptionService.HealthCheck:output_type -> subgen.v1.HealthCheckResponse
-	8,  // [8:11] is the sub-list for method output_type
-	5,  // [5:8] is the sub-list for method input_type
-	5,  // [5:5] is the sub-list for extension type_name
-	5,  // [5:5] is the sub-list for extension extendee
-	0,  // [0:5] is the sub-list for field type_name
+	10, // 1: subgen.v1.TranscribeRequest.metadata:type_name -> subgen.v1.TranscribeRequest.MetadataEntry
+	11, // 2: subgen.v1.TranscribeOptions.extra_kwargs:type_name -> subgen.v1.TranscribeOptions.ExtraKwargsEntry
+	5,  // 3: subgen.v1.TranscribeResponse.stats:type_name -> subgen.v1.TranscriptionStats
+	3,  // 4: subgen.v1.TranscribeResponse.segments:type_name -> subgen.v1.SubtitleSegment
+	0,  // 5: subgen.v1.HealthCheckResponse.status:type_name -> subgen.v1.HealthCheckResponse.Status
+	1,  // 6: subgen.v1.TranscriptionService.Transcribe:input_type -> subgen.v1.TranscribeRequest
+	6,  // 7: subgen.v1.TranscriptionService.DetectLanguage:input_type -> subgen.v1.DetectLanguageRequest
+	8,  // 8: subgen.v1.TranscriptionService.HealthCheck:input_type -> subgen.v1.HealthCheckRequest
+	4,  // 9: subgen.v1.TranscriptionService.Transcribe:output_type -> subgen.v1.TranscribeResponse
+	7,  // 10: subgen.v1.TranscriptionService.DetectLanguage:output_type -> subgen.v1.DetectLanguageResponse
+	9,  // 11: subgen.v1.TranscriptionService.HealthCheck:output_type -> subgen.v1.HealthCheckResponse
+	9,  // [9:12] is the sub-list for method output_type
+	6,  // [6:9] is the sub-list for method input_type
+	6,  // [6:6] is the sub-list for extension type_name
+	6,  // [6:6] is the sub-list for extension extendee
+	0,  // [0:6] is the sub-list for field type_name
 }
 
 func init() { file_transcription_proto_init() }
@@ -976,7 +1055,7 @@ func file_transcription_proto_init() {
 		(*TranscribeRequest_FilePath)(nil),
 		(*TranscribeRequest_AudioContent)(nil),
 	}
-	file_transcription_proto_msgTypes[4].OneofWrappers = []any{
+	file_transcription_proto_msgTypes[5].OneofWrappers = []any{
 		(*DetectLanguageRequest_FilePath)(nil),
 		(*DetectLanguageRequest_AudioContent)(nil),
 	}
@@ -986,7 +1065,7 @@ func file_transcription_proto_init() {
 			GoPackagePath: reflect.TypeOf(x{}).PkgPath(),
 			RawDescriptor: unsafe.Slice(unsafe.StringData(file_transcription_proto_rawDesc), len(file_transcription_proto_rawDesc)),
 			NumEnums:      1,
-			NumMessages:   10,
+			NumMessages:   11,
 			NumExtensions: 0,
 			NumServices:   1,
 		},

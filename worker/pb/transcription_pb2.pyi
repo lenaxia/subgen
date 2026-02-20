@@ -2,7 +2,8 @@ from google.protobuf.internal import containers as _containers
 from google.protobuf.internal import enum_type_wrapper as _enum_type_wrapper
 from google.protobuf import descriptor as _descriptor
 from google.protobuf import message as _message
-from collections.abc import Mapping as _Mapping
+from google.protobuf import service as _service
+from collections.abc import Iterable as _Iterable, Mapping as _Mapping
 from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 
 DESCRIPTOR: _descriptor.FileDescriptor
@@ -69,19 +70,31 @@ class TranscribeOptions(_message.Message):
     compute_type: str
     def __init__(self, whisper_model: _Optional[str] = ..., whisper_threads: _Optional[int] = ..., word_level_highlight: bool = ..., custom_regroup: _Optional[str] = ..., lrc_for_audio: bool = ..., custom_prompt: _Optional[str] = ..., append_footer: bool = ..., subtitle_language_name: _Optional[str] = ..., show_model_in_filename: bool = ..., show_subgen_in_filename: bool = ..., use_prompt: bool = ..., extra_kwargs: _Optional[_Mapping[str, str]] = ..., device: _Optional[str] = ..., compute_type: _Optional[str] = ...) -> None: ...
 
+class SubtitleSegment(_message.Message):
+    __slots__ = ("start", "end", "text")
+    START_FIELD_NUMBER: _ClassVar[int]
+    END_FIELD_NUMBER: _ClassVar[int]
+    TEXT_FIELD_NUMBER: _ClassVar[int]
+    start: float
+    end: float
+    text: str
+    def __init__(self, start: _Optional[float] = ..., end: _Optional[float] = ..., text: _Optional[str] = ...) -> None: ...
+
 class TranscribeResponse(_message.Message):
-    __slots__ = ("success", "subtitle_path", "detected_language", "error_message", "stats")
+    __slots__ = ("success", "subtitle_path", "detected_language", "error_message", "stats", "segments")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     SUBTITLE_PATH_FIELD_NUMBER: _ClassVar[int]
     DETECTED_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     STATS_FIELD_NUMBER: _ClassVar[int]
+    SEGMENTS_FIELD_NUMBER: _ClassVar[int]
     success: bool
     subtitle_path: str
     detected_language: str
     error_message: str
     stats: TranscriptionStats
-    def __init__(self, success: bool = ..., subtitle_path: _Optional[str] = ..., detected_language: _Optional[str] = ..., error_message: _Optional[str] = ..., stats: _Optional[_Union[TranscriptionStats, _Mapping]] = ...) -> None: ...
+    segments: _containers.RepeatedCompositeFieldContainer[SubtitleSegment]
+    def __init__(self, success: bool = ..., subtitle_path: _Optional[str] = ..., detected_language: _Optional[str] = ..., error_message: _Optional[str] = ..., stats: _Optional[_Union[TranscriptionStats, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SubtitleSegment, _Mapping]]] = ...) -> None: ...
 
 class TranscriptionStats(_message.Message):
     __slots__ = ("duration_seconds", "segment_count", "model_load_time_ms", "transcription_time_ms", "peak_memory_mb")
@@ -154,3 +167,7 @@ class HealthCheckResponse(_message.Message):
     version: str
     uptime_seconds: int
     def __init__(self, status: _Optional[_Union[HealthCheckResponse.Status, str]] = ..., memory_mb: _Optional[int] = ..., model_loaded: bool = ..., jobs_processed: _Optional[int] = ..., jobs_active: _Optional[int] = ..., version: _Optional[str] = ..., uptime_seconds: _Optional[int] = ...) -> None: ...
+
+class TranscriptionService(_service.service): ...
+
+class TranscriptionService_Stub(TranscriptionService): ...
