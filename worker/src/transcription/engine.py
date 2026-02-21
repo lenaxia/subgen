@@ -104,7 +104,7 @@ class TranscriptionEngine:
         start_time = time.time()
 
         # Handle byte content by writing to temp file
-        temp_file = None
+        temp_files = []
         try:
             if isinstance(source, bytes):
                 # Write bytes to temp file
@@ -114,6 +114,7 @@ class TranscriptionEngine:
                 temp_file.write(source)
                 temp_file.close()
                 file_path = temp_file.name
+                temp_files.append(temp_file.name)
                 logger.debug(f"Written {len(source)} bytes to temp file: {file_path}")
             else:
                 # It's already a file path
@@ -149,7 +150,16 @@ class TranscriptionEngine:
             )
             if extracted_audio:
                 try:
-                    data = extracted_audio.read()
+                    # Write audio bytes to temporary file
+                    import tempfile
+
+                    temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                    temp_file.write(extracted_audio.read())
+                    temp_file.close()
+                    data = temp_file.name
+
+                    # Track temp file for cleanup
+                    temp_files = [temp_file.name]
                 finally:
                     extracted_audio.close()
 
@@ -235,13 +245,14 @@ class TranscriptionEngine:
                 success=False, subtitle_path="", detected_language="", error_message=str(e)
             )
         finally:
-            # Clean up temp file if we created one
-            if temp_file and os.path.exists(temp_file.name):
-                try:
-                    os.unlink(temp_file.name)
-                    logger.debug(f"Cleaned up temp file: {temp_file.name}")
-                except Exception as e:
-                    logger.warning(f"Failed to clean up temp file {temp_file.name}: {e}")
+            # Clean up temp files if we created any
+            for temp_file_path in temp_files:
+                if os.path.exists(temp_file_path):
+                    try:
+                        os.unlink(temp_file_path)
+                        logger.debug(f"Cleaned up temp file: {temp_file_path}")
+                    except Exception as e:
+                        logger.warning(f"Failed to clean up temp file {temp_file_path}: {e}")
 
     def detect_language(
         self,

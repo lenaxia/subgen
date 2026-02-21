@@ -419,6 +419,296 @@ Afrikaans, Arabic, Armenian, Azerbaijani, Belarusian, Bosnian, Bulgarian, Catala
 
 See https://github.com/openai/whisper for complete list.
 
+# Plex Workflow for Existing Libraries
+
+Subgen provides flexible workflows for adding subtitles to existing Plex libraries with mixed subtitle coverage.
+
+## 🎯 Three Ways to Trigger Subtitles
+
+### **Option A: Webhook Automation (Recommended)**
+**Setup Plex Webhook in Plex Settings:**
+1. Go to Plex Web UI → Settings → Webhooks
+2. Add webhook URL: `http://your-subgen-server:9000/plex`
+3. Select events: `library.new` (and optionally `media.play`)
+
+**Workflow:**
+```
+New media added to Plex → Plex sends webhook → Subgen processes automatically
+```
+
+### **Option B: Manual Batch Processing**
+**Use the Batch API endpoint:**
+```bash
+# Process entire library or specific paths
+curl -X POST http://your-subgen-server:9000/batch \
+  -H "Content-Type: application/json" \
+  -d '{
+    "paths": ["/media/TV Shows", "/media/Movies"],
+    "recursive": true,
+    "force": false
+  }'
+```
+
+### **Option C: File Monitoring**
+**Configure file system monitoring:**
+```yaml
+MONITOR: "true"
+TRANSCRIBE_FOLDERS: "/media"
+```
+
+Subgen will scan `/media` directory and process any media files it finds.
+
+## 🎬 Selective Processing with Skip Logic
+
+Subgen has intelligent skip logic to avoid redundant processing:
+
+```yaml
+# Skip conditions (configured in deploy-working.yaml)
+SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE: "eng"  # Skip if English subs exist
+SKIP_IF_TARGET_SUBTITLES_EXIST: "true"      # Skip if .srt/.lrc already exists
+```
+
+**What gets skipped:**
+1. Files with existing subtitles in the target language
+2. Files with embedded subtitles in the configured language
+3. Files already processed (based on subtitle file existence)
+4. Files without valid audio tracks
+
+## 🎪 User Control Mechanisms
+
+### **A. Library Section Control**
+Create separate Plex libraries for different processing needs:
+```
+Plex Libraries:
+- "Movies (Auto-Subtitle)" → Webhook enabled
+- "Movies (Manual Only)"   → Webhook disabled
+- "TV Shows (All)"         → Webhook + queue next episode
+- "TV Shows (Current)"     → Webhook only
+```
+
+### **B. File/Folder Naming Conventions**
+Use special filenames to control processing:
+```
+movie.nosubtitle.mp4      ← Will be processed
+movie.hassubtitles.mp4    ← Might be skipped if subs detected
+/TV Shows/Season 1/.skip  ← Entire folder skipped
+```
+
+### **C. Plex Collections/Tags**
+Tag media in Plex and filter in batch API:
+```bash
+# Process only items with tag "needs-subs"
+curl -X POST http://subgen:9000/batch \
+  -d '{"plex_filter": "tag=needs-subs"}'
+```
+
+## 📺 Episode Queueing for TV Series
+
+Configure episode queueing behavior:
+```yaml
+PLEX_QUEUE_NEXT_EPISODE: "true"   # Queue next episode automatically
+PLEX_QUEUE_SEASON: "false"        # Don't queue entire season
+PLEX_QUEUE_SERIES: "false"        # Don't queue entire series
+```
+
+**Example TV Series Workflow:**
+```
+1. Episode S01E01 added → Processed
+2. Episode S01E02 added → Processed (if PLEX_QUEUE_NEXT_EPISODE=true)
+3. Episode S01E03 played → Processed (if PROCESS_MEDIA_ON_PLAY=true)
+```
+
+## 🌐 Language Selection
+
+Control which language to transcribe:
+```yaml
+# Default behavior: Auto-detect language
+TRANSCRIBE_OR_TRANSLATE: "transcribe"
+
+# Force specific language for all files
+FORCE_LANGUAGE: "jpn"  # Always transcribe Japanese audio
+
+# Or specify per-request via API
+curl -X POST http://subgen:9000/plex \
+  -d 'payload={"event":"library.new","Metadata":{"ratingKey":"123"},"language":"jpn"}'
+```
+
+## 🎛️ Monitoring and Control Dashboard
+
+Access the web interface for control:
+```
+http://your-subgen-server:9000/queue     # View processing queue
+http://your-subgen-server:9000/metrics   # Prometheus metrics
+http://your-subgen-server:9000/health    # System health
+```
+
+## 🛠️ Practical User Workflows
+
+### **Workflow 1: "Add subtitles to everything"**
+```bash
+# 1. Enable all automation
+PLEX_ENABLED: "true"
+PROCESS_ADDED_MEDIA: "true"
+MONITOR: "true"
+
+# 2. Run initial scan
+curl -X POST http://subgen:9000/batch \
+  -d '{"paths": ["/media"], "recursive": true}'
+
+# 3. Let webhooks handle new additions
+```
+
+### **Workflow 2: "Selective subtitles for specific shows"**
+```bash
+# 1. Create a "needs-subs" collection in Plex
+# 2. Add specific shows/movies to this collection
+# 3. Run batch processing on collection only
+curl -X POST http://subgen:9000/batch \
+  -d '{"plex_collection": "needs-subs"}'
+```
+
+### **Workflow 3: "On-demand for watched content"**
+```yaml
+# Only process when media is played
+PROCESS_ADDED_MEDIA: "false"
+PROCESS_MEDIA_ON_PLAY: "true"
+
+# User watches movie → Subtitles generated for next viewing
+```
+
+### **Workflow 4: "Backfill missing subtitles"**
+```bash
+# Find files without subtitles
+find /media -type f \( -name "*.mp4" -o -name "*.mkv" \) \
+  -exec bash -c '[[ ! -f "${1%.*}.srt" ]] && echo "$1"' _ {} \;
+
+# Process only files without .srt
+while read -r file; do
+  curl -X POST http://subgen:9000/transcribe \
+    -d "file_path=$file"
+done < files-without-subs.txt
+```
+
+## 🎮 Advanced Control via API
+
+```bash
+# Check if file should be skipped
+curl -X POST http://subgen:9000/skip-check \
+  -d '{"file_path": "/media/movie.mp4"}'
+
+# Response: {"should_skip": true, "reason": "existing_subtitles"}
+
+# Force process even if would be skipped
+curl -X POST http://subgen:9000/transcribe \
+  -d '{"file_path": "/media/movie.mp4", "force": true}'
+
+# Process with specific language
+curl -X POST http://subgen:9000/transcribe \
+  -d '{"file_path": "/media/anime.mkv", "language": "jpn"}'
+```
+
+## 🎥 MKV Audio Track Selection
+
+Subgen intelligently handles MKV files with multiple audio tracks:
+
+### **Track Discovery**
+The system uses `ffmpeg.probe()` to scan MKV files and identify all audio tracks, extracting:
+- **Index**: Track number (0, 1, 2, etc.)
+- **Codec**: Audio format (aac, mp3, flac, etc.)
+- **Language**: Language code from metadata (e.g., "eng", "jpn", "und" for undefined)
+- **is_default**: Boolean flag if this is the default track
+- **Title**: Optional track title from metadata
+
+### **Track Selection Priority**
+The system uses this priority order:
+
+```
+1. PREFERRED_LANGUAGE (if specified) → Track matching the requested language
+2. DEFAULT_TRACK → Track marked as "default" in metadata  
+3. FIRST_TRACK → Track 0 (fallback)
+```
+
+### **Real-World Examples**
+
+**Example 1: Anime MKV with dual audio**
+```
+Track 0: aac eng (default)    ← English dub (marked as default)
+Track 1: aac jpn              ← Japanese original
+Track 2: aac eng [Commentary] ← Director commentary
+```
+
+- If user requests Japanese: Selects **Track 1** (language="jpn")
+- If no language specified: Selects **Track 0** (is_default=True)
+- If Japanese track missing: Falls back to **Track 0**
+
+**Example 2: Multi-language documentary**
+```
+Track 0: aac eng (default) ← English
+Track 1: aac fra          ← French
+Track 2: aac deu          ← German
+Track 3: aac spa          ← Spanish
+```
+
+- User requests French: Selects **Track 1**
+- No request: Selects **Track 0** (English default)
+
+### **Integration with Transcription Flow**
+The track selection happens automatically when you transcribe:
+```python
+# When you transcribe with force_language="jpn"
+extracted_audio = handle_multiple_audio_tracks(
+    file_path, 
+    force_language="jpn"  # ← Language preference passed here
+)
+```
+
+### **Metadata Sources in MKV Files**
+MKV files store language information in:
+- **Track header**: `language` field (ISO 639-2 code like "eng", "jpn")
+- **Disposition flags**: `default`, `forced`, `original` flags
+- **Tags section**: Additional metadata like track titles
+
+### **Practical Usage**
+```bash
+# Transcribe with specific language
+curl -X POST http://subgen:9000/transcribe \
+  -d '{"file_path": "/media/anime.mkv", "language": "jpn"}'
+
+# Auto-detect (uses default track)
+curl -X POST http://subgen:9000/transcribe \
+  -d '{"file_path": "/media/movie.mkv"}'
+```
+
+## 📊 Real-World Example Configuration
+
+```yaml
+# For a mixed library:
+PLEX_ENABLED: "true"
+PROCESS_ADDED_MEDIA: "true"      # Auto-process new additions
+PROCESS_MEDIA_ON_PLAY: "false"   # Don't process on play
+PLEX_QUEUE_NEXT_EPISODE: "true"  # Queue next TV episode
+SKIP_IF_TARGET_SUBTITLES_EXIST: "true"  # Don't re-process
+MONITOR: "true"                  # Also watch file system
+TRANSCRIBE_FOLDERS: "/media/Anime,/media/Foreign Films"
+FORCE_LANGUAGE: ""               # Auto-detect language
+PREFERRED_AUDIO_LANGUAGES: "eng|jpn|fra|deu|spa"  # Preferred tracks
+```
+
+## 🎪 Summary of User Control Points:
+
+1. **Webhook Events**: Control which Plex events trigger processing
+2. **Skip Logic**: Automatically skip files with existing subtitles
+3. **Batch API**: Manual control over specific paths/collections
+4. **File Monitoring**: Filesystem-based triggering
+5. **Queue Settings**: Control TV episode queueing behavior
+6. **Language Settings**: Force specific languages or auto-detect
+7. **Path Filters**: Process only specific folders
+8. **Force Flag**: Override skip logic when needed
+9. **MKV Track Selection**: Intelligent audio track handling
+10. **Collection Filtering**: Process only tagged/collected media
+
+The system provides flexible control from fully automated to completely manual, with intelligent skip logic to avoid redundant processing of an existing Plex library.
+
 # Troubleshooting
 
 ## High CPU usage when idle
@@ -570,6 +860,6 @@ Same as original repository. See [LICENSE](LICENSE) file.
 
 ---
 
-**Last Updated**: 2026-02-17  
-**Fork Version**: 0.1.9-test (production ready)  
+**Last Updated**: 2026-02-21  
+**Fork Version**: 0.2.18 (production ready)  
 **Status**: Active development, production validated ✅

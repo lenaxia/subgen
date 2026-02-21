@@ -36,7 +36,9 @@ data:
   # Media server configuration
   PLEX_ENABLED: "true"
   PLEX_SERVER: "http://plex.media.svc.cluster.local:32400"
-  PLEX_QUEUE_NEXT_EPISODE: "false"
+  PLEX_QUEUE_NEXT_EPISODE: "true"
+  PLEX_QUEUE_SEASON: "false"
+  PLEX_QUEUE_SERIES: "false"
   JELLYFIN_ENABLED: "false"
   JELLYFIN_SERVER: "http://jellyfin.media.svc.cluster.local:8096"
   
@@ -44,6 +46,11 @@ data:
   USE_PATH_MAPPING: "true"
   PATH_MAPPING_FROM: "/media"
   PATH_MAPPING_TO: "/volume2/downloads/[Plex Temp Library]"
+  
+  # File monitoring configuration
+  MONITOR: "true"
+  TRANSCRIBE_FOLDERS: "/media"
+  SCANNER_INITIALIZED: "true"
 ---
 apiVersion: v1
 kind: ConfigMap
@@ -157,7 +164,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: orchestrator
-        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.16
+        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.18
         imagePullPolicy: Always
         env:
         - name: DEBUG
@@ -238,7 +245,7 @@ spec:
         runAsGroup: 0
       containers:
       - name: worker
-        image: ghcr.io/lenaxia/subgen-worker:v0.2.16-cpu
+        image: ghcr.io/lenaxia/subgen-worker:v0.2.18-cpu
         imagePullPolicy: Always
         envFrom:
         - configMapRef:

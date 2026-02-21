@@ -107,7 +107,11 @@ class WhisperConfig(BaseSettings):
         default=2,
         ge=1,
         le=10,
-        description="Max concurrent transcriptions",
+        description="""Max concurrent transcription/language detection jobs.
+        
+        Each job uses WHISPER_THREADS CPU threads and blocks one gRPC thread.
+        Set MAX_WORKERS >= concurrent_transcriptions * 2 + 2 for system buffer.
+        """,
     )
     compute_type: Literal["auto", "int8", "int8_float16", "float16", "float32"] = Field(
         default="auto",
@@ -221,9 +225,14 @@ class SystemConfig(BaseSettings):
         description="Webhook server port",
     )
     max_workers: int = Field(
-        default=4,
-        ge=1,
-        description="Maximum concurrent workers",
+        default=10,
+        ge=3,  # Minimum: 1 system + 2 work threads
+        description="""Total gRPC thread pool size.
+        
+        Includes both system threads (health checks, metrics) and work threads (transcriptions).
+        Recommended: CONCURRENT_TRANSCRIPTIONS * 2 + 2 (system buffer)
+        Example: 2 concurrent jobs → 2*2 + 2 = 6 threads minimum
+        """,
     )
     memory_threshold_mb: int = Field(
         default=3000,
@@ -234,6 +243,35 @@ class SystemConfig(BaseSettings):
         default="INFO",
         description="Logging level",
     )
+
+    @model_validator(mode="after")
+    def validate_threading_config(self) -> "SystemSettings":
+        """Validate threading configuration."""
+        # Minimum threads needed: work threads + system buffer
+        min_recommended = self.concurrent_transcriptions * 2 + 2
+
+        if self.max_workers < min_recommended:
+            logger.warning(
+                f"Thread pool may be too small: MAX_WORKERS={self.max_workers}, "
+                f"but recommended minimum is {min_recommended} "
+                f"(CONCURRENT_TRANSCRIPTIONS={self.concurrent_transcriptions} * 2 + 2 system buffer)"
+            )
+            logger.warning(
+                "Health checks may timeout if all gRPC threads are busy with transcriptions."
+            )
+
+        # Check CPU thread configuration
+        total_cpu_threads = self.concurrent_transcriptions * self.cpu_threads
+        logger.info(
+            f"Thread configuration: "
+            f"gRPC threads={self.max_workers}, "
+            f"concurrent jobs={self.concurrent_transcriptions}, "
+            f"CPU threads per job={self.cpu_threads}, "
+            f"total CPU threads={total_cpu_threads}"
+        )
+
+        return self
+
     debug: bool = Field(
         default=False,
         description="Enable debug mode",

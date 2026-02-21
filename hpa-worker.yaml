@@ -1,0 +1,73 @@
+apiVersion: autoscaling/v2
+kind: HorizontalPodAutoscaler
+metadata:
+  name: subgen-worker
+  namespace: default
+  labels:
+    app: subgen
+    component: worker
+spec:
+  scaleTargetRef:
+    apiVersion: apps/v1
+    kind: Deployment
+    name: subgen-worker
+  minReplicas: 1
+  maxReplicas: 10
+  metrics:
+  - type: Resource
+    resource:
+      name: cpu
+      target:
+        type: Utilization
+        averageUtilization: 70
+  - type: Resource
+    resource:
+      name: memory
+      target:
+        type: Utilization
+        averageUtilization: 80
+  behavior:
+    scaleDown:
+      stabilizationWindowSeconds: 300  # 5 minutes cooldown before scaling down
+      policies:
+      - type: Percent
+        value: 50  # Scale down by at most 50% at a time
+        periodSeconds: 60
+      - type: Pods
+        value: 1   # Scale down by at most 1 pod at a time
+        periodSeconds: 60
+      selectPolicy: Min  # Use the most restrictive policy
+    scaleUp:
+      stabilizationWindowSeconds: 60   # 1 minute cooldown before scaling up
+      policies:
+      - type: Percent
+        value: 100  # Scale up by at most 100% at a time
+        periodSeconds: 60
+      - type: Pods
+        value: 2    # Scale up by at most 2 pods at a time
+        periodSeconds: 60
+      selectPolicy: Max  # Use the least restrictive policy
+---
+apiVersion: policy/v1
+kind: PodDisruptionBudget
+metadata:
+  name: subgen-worker-pdb
+  namespace: default
+spec:
+  maxUnavailable: 1
+  selector:
+    matchLabels:
+      app: subgen
+      component: worker
+---
+# Optional: Update StatefulSet for parallel pod management
+# Note: This requires updating the existing StatefulSet
+# Uncomment and apply if you want faster scaling
+# apiVersion: apps/v1
+# kind: StatefulSet
+# metadata:
+#   name: subgen-worker
+#   namespace: default
+# spec:
+#   podManagementPolicy: Parallel  # Change from OrderedReady for faster scaling
+#   # ... rest of StatefulSet spec remains the same
