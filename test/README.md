@@ -111,7 +111,7 @@ The Docker Compose configuration uses these key settings:
 - `LOG_LEVEL=DEBUG`
 
 **Orchestrator (Go):**
-- `PYTHON_WORKER_ADDRESS=worker:50051`
+- `WORKER_ADDRESS=worker:50051`
 - `WEBHOOK_PORT=9000`
 - `METRICS_PORT=9090`
 

@@ -24,7 +24,6 @@ RELATED_PACKAGES=(
 REQUIREMENT_FILES=(
     "worker/requirements.txt"
     "worker/requirements-dev.txt"
-    "legacy/requirements.txt"
 )
 
 # Find all go.mod files

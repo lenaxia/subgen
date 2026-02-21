@@ -108,25 +108,5 @@ networks:
   subgen:
     driver: bridge
 
-# ==========================================
-# LEGACY CONFIGURATION (Deprecated)
-# ==========================================
-# For the old monolithic image, use:
-#
-# services:
-#   subgen:
-#     image: mccloud/subgen:latest
-#     container_name: subgen
-#     ports:
-#       - "9000:9000"
-#     environment:
-#       - WHISPER_MODEL=medium
-#       - TRANSCRIBE_DEVICE=cpu
-#       # ... other variables
-#     volumes:
-#       - "${TV}:/tv"
-#       - "${MOVIES}:/movies"
-#       - "${APPDATA}/subgen/models:/subgen/models"
-#
-# See legacy/README.md for details
+
 

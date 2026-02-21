@@ -40,19 +40,10 @@ controllers:
           pullPolicy: Always
         
         env:
-          # Orchestrator config
-          WEBHOOK_PORT: "9000"
-          METRICS_PORT: "9090"
-          LOG_LEVEL: "info"
-          LOG_FORMAT: "json"
-          
-          # Worker discovery (Phase 1: localhost)
-          WORKER_DISCOVERY: "localhost"
-          PYTHON_WORKER_ADDRESS: "localhost:50051"
-          
-          # Queue config
-          QUEUE_MAX_SIZE: "1000"
-          QUEUE_WORKER_TIMEOUT: "18000"  # 5 hours
+          # Orchestrator config (using defaults for most values)
+          # Defaults: WEBHOOK_PORT=9000, METRICS_PORT=9090, LOG_LEVEL=info, LOG_FORMAT=json
+          # Defaults: QUEUE_MAX_SIZE=1000, QUEUE_WORKER_TIMEOUT=18000 (5 hours)
+          # Defaults: WORKER_DISCOVERY=localhost, WORKER_ADDRESS=localhost:50051
           
           # Processing flags
           PROCESS_ADDED_MEDIA: "true"
@@ -126,14 +117,13 @@ controllers:
         env:
           # Worker config
           GRPC_PORT: "50051"
-          LOG_LEVEL: "info"
-          LOG_FORMAT: "json"
+          # LOG_LEVEL defaults to "info", LOG_FORMAT defaults to "json"
           
-          # Whisper config
-          WHISPER_MODEL: "medium"  # Options: tiny, base, small, medium, large, large-v3
-          WHISPER_THREADS: "4"
-          TRANSCRIBE_DEVICE: "cpu"  # Options: cpu, cuda
-          COMPUTE_TYPE: "auto"  # Options: int8, int8_float16, float16, float32, auto
+          # Whisper config (defaults shown, customize as needed)
+          WHISPER_MODEL: "medium"  # Default: "medium", Options: tiny, base, small, medium, large, large-v3
+          WHISPER_THREADS: "4"     # Default: 4
+          TRANSCRIBE_DEVICE: "cpu" # Default: "cpu", Options: cpu, cuda
+          COMPUTE_TYPE: "auto"     # Default: "auto", Options: int8, int8_float16, float16, float32, auto
           MODEL_PATH: "/models"
           
           # Memory management
