@@ -245,31 +245,11 @@ class SystemConfig(BaseSettings):
     )
 
     @model_validator(mode="after")
-    def validate_threading_config(self) -> "SystemSettings":
+    def validate_threading_config(self) -> "SystemConfig":
         """Validate threading configuration."""
-        # Minimum threads needed: work threads + system buffer
-        min_recommended = self.concurrent_transcriptions * 2 + 2
-
-        if self.max_workers < min_recommended:
-            logger.warning(
-                f"Thread pool may be too small: MAX_WORKERS={self.max_workers}, "
-                f"but recommended minimum is {min_recommended} "
-                f"(CONCURRENT_TRANSCRIPTIONS={self.concurrent_transcriptions} * 2 + 2 system buffer)"
-            )
-            logger.warning(
-                "Health checks may timeout if all gRPC threads are busy with transcriptions."
-            )
-
-        # Check CPU thread configuration
-        total_cpu_threads = self.concurrent_transcriptions * self.cpu_threads
-        logger.info(
-            f"Thread configuration: "
-            f"gRPC threads={self.max_workers}, "
-            f"concurrent jobs={self.concurrent_transcriptions}, "
-            f"CPU threads per job={self.cpu_threads}, "
-            f"total CPU threads={total_cpu_threads}"
-        )
-
+        # Note: cross-config validation (concurrent_transcriptions, cpu_threads)
+        # is done at the WorkerSettings level where both whisper and system configs
+        # are available.
         return self
 
     debug: bool = Field(
