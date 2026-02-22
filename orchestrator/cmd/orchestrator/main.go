@@ -593,7 +593,8 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		td.log.WithField("audio_bytes", len(task.AudioContent)).Debug("ASR task with audio content, will send via gRPC")
 	}
 
-	// Select a worker
+	// Select a worker.  SelectWorker increments the worker's Active count
+	// optimistically so subsequent selections see the updated load immediately.
 	worker, err := td.workerPool.SelectWorker()
 	if err != nil {
 		td.log.WithError(err).Error("Failed to select worker")
@@ -602,6 +603,10 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		})
 		return
 	}
+
+	// Decrement the Active count when this goroutine exits (success or error).
+	workerID := worker.ID
+	defer td.workerPool.DecrementActive(workerID)
 
 	// Call transcribe RPC
 	resp, err := td.grpcClient.Transcribe(ctx, worker.Address, task)

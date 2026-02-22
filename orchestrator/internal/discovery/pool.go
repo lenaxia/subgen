@@ -84,36 +84,78 @@ func (p *Pool) Start(ctx context.Context) error {
 	return nil
 }
 
-// SelectWorker chooses a worker based on load balancing strategy
+// SelectWorker chooses a worker based on load balancing strategy.
+// It also increments the chosen worker's Active count optimistically so
+// subsequent calls see up-to-date load before the discovery refresh fires.
 func (p *Pool) SelectWorker() (*Worker, error) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 
-	healthy := p.filterHealthy()
-	if len(healthy) == 0 {
+	// Build indices of healthy workers in p.workers (not a copy).
+	var healthyIdx []int
+	for i, w := range p.workers {
+		if w.Healthy {
+			healthyIdx = append(healthyIdx, i)
+		}
+	}
+	if len(healthyIdx) == 0 {
 		return nil, ErrNoHealthyWorkers
 	}
 
-	var worker *Worker
+	var idx int
 
 	switch p.strategy {
 	case RoundRobin:
-		worker = &healthy[p.next%len(healthy)]
+		idx = healthyIdx[p.next%len(healthyIdx)]
 		p.next++
 		WorkerSelectionTotal.WithLabelValues("round_robin").Inc()
 
 	case LeastLoaded:
-		worker = p.findLeastLoaded(healthy)
+		idx = p.findLeastLoadedIdx(healthyIdx)
 		WorkerSelectionTotal.WithLabelValues("least_loaded").Inc()
 
 	default:
 		return nil, fmt.Errorf("unknown strategy: %s", p.strategy)
 	}
 
-	return worker, nil
+	// Optimistically increment so the next SelectWorker call sees this job.
+	p.workers[idx].Active++
+
+	// Return a pointer into the live slice so callers see the current address.
+	return &p.workers[idx], nil
 }
 
-// Refresh re-discovers all workers
+// IncrementActive increments the active job count for a worker by ID.
+// It is a no-op if the worker is not found.
+func (p *Pool) IncrementActive(workerID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.workers {
+		if p.workers[i].ID == workerID {
+			p.workers[i].Active++
+			return
+		}
+	}
+}
+
+// DecrementActive decrements the active job count for a worker by ID,
+// clamping at zero. It is a no-op if the worker is not found.
+func (p *Pool) DecrementActive(workerID string) {
+	p.mu.Lock()
+	defer p.mu.Unlock()
+	for i := range p.workers {
+		if p.workers[i].ID == workerID {
+			if p.workers[i].Active > 0 {
+				p.workers[i].Active--
+			}
+			return
+		}
+	}
+}
+
+// Refresh re-discovers all workers.
+// It preserves the orchestrator's live Active counts for existing workers so
+// that load-balancing decisions remain accurate between discovery cycles.
 func (p *Pool) Refresh(ctx context.Context) error {
 	workers, err := p.discovery.GetWorkers(ctx)
 	if err != nil {
@@ -122,6 +164,18 @@ func (p *Pool) Refresh(ctx context.Context) error {
 	}
 
 	p.mu.Lock()
+	// Carry over the orchestrator-tracked Active counts for workers that are
+	// already known.  Discovery backends return Active == 0 (or a stale value
+	// from the remote pod); we prefer our own bookkeeping.
+	activeByID := make(map[string]int32, len(p.workers))
+	for _, w := range p.workers {
+		activeByID[w.ID] = w.Active
+	}
+	for i := range workers {
+		if live, ok := activeByID[workers[i].ID]; ok {
+			workers[i].Active = live
+		}
+	}
 	p.workers = workers
 	p.mu.Unlock()
 
@@ -257,19 +311,18 @@ func (p *Pool) filterHealthy() []Worker {
 	return healthy
 }
 
-// findLeastLoaded returns worker with fewest active jobs
-func (p *Pool) findLeastLoaded(workers []Worker) *Worker {
-	if len(workers) == 0 {
-		return nil
-	}
-
-	leastLoaded := &workers[0]
-	for i := range workers {
-		if workers[i].Active < leastLoaded.Active {
-			leastLoaded = &workers[i]
+// findLeastLoadedIdx returns the index into p.workers of the healthy worker
+// with the fewest active jobs. healthyIdx must be non-empty.
+// On a tie the worker with the lowest index is chosen, which together with
+// RoundRobin-style tie-breaking keeps distribution even.
+func (p *Pool) findLeastLoadedIdx(healthyIdx []int) int {
+	best := healthyIdx[0]
+	for _, idx := range healthyIdx[1:] {
+		if p.workers[idx].Active < p.workers[best].Active {
+			best = idx
 		}
 	}
-	return leastLoaded
+	return best
 }
 
 // Helper functions for worker list manipulation

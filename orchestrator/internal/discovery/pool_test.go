@@ -86,11 +86,11 @@ func TestPool_SelectWorker_LeastLoaded(t *testing.T) {
 	err := pool.Start(ctx)
 	require.NoError(t, err)
 
-	// Should select worker-2 (least loaded)
+	// Should select worker-2 (least loaded) and increment its Active count.
 	worker, err := pool.SelectWorker()
 	require.NoError(t, err)
 	assert.Equal(t, "worker-2", worker.ID)
-	assert.Equal(t, int32(2), worker.Active)
+	assert.Equal(t, int32(3), worker.Active) // incremented from 2 → 3 after selection
 }
 
 // TestPool_SelectWorker_NoHealthyWorkers tests error when no workers are healthy
