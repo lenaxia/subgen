@@ -164,7 +164,7 @@ spec:
         fsGroupChangePolicy: "OnRootMismatch"
       containers:
       - name: orchestrator
-        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.18
+        image: ghcr.io/lenaxia/subgen-orchestrator:v0.2.21
         imagePullPolicy: Always
         env:
         - name: DEBUG
@@ -245,7 +245,7 @@ spec:
         runAsGroup: 0
       containers:
       - name: worker
-        image: ghcr.io/lenaxia/subgen-worker:v0.2.18-cpu
+        image: ghcr.io/lenaxia/subgen-worker:v0.2.21-cpu
         imagePullPolicy: Always
         envFrom:
         - configMapRef:
@@ -287,7 +287,7 @@ spec:
         volumeMounts:
         - mountPath: /models
           name: models
-        - mountPath: /mnt/downloads
+        - mountPath: /media
           name: media
       volumes:
       - name: models
