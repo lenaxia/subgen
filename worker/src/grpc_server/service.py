@@ -7,6 +7,7 @@ Implements the three RPC methods defined in transcription.proto:
 - HealthCheck: Worker health monitoring
 """
 
+import glob
 import logging
 import time
 import os
@@ -199,6 +200,18 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             if not os.path.exists(request.file_path):
                 logger.error(f"Transcribe: file not found: {request.file_path}")
                 context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {request.file_path}")
+
+            # Skip check: if subtitle already exists and config says to skip, return early
+            if self.config.skip.skip_if_target_subtitles_exist:
+                base = os.path.splitext(request.file_path)[0]
+                existing = glob.glob(f"{base}.subgen.*.*.srt") + glob.glob(f"{base}.subgen.*.*.lrc")
+                if existing:
+                    logger.info(f"Skipping transcription, subtitle already exists: {existing[0]}")
+                    return transcription_pb2.TranscribeResponse(
+                        success=True,
+                        subtitle_path=existing[0],
+                        detected_language="",
+                    )
 
         elif request.WhichOneof("audio_source") == "audio_content":
             source_type = "bytes"
