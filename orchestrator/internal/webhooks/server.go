@@ -183,9 +183,13 @@ func (s *Server) setupRoutes() {
 
 	// POST handlers
 	s.app.Post("/plex", s.handlePlex)
+	s.app.Post("/webhook/plex", s.handlePlex) // Plex calls /webhook/plex directly
 	s.app.Post("/jellyfin", s.handleJellyfin)
+	s.app.Post("/webhook/jellyfin", s.handleJellyfin)
 	s.app.Post("/emby", s.handleEmby)
+	s.app.Post("/webhook/emby", s.handleEmby)
 	s.app.Post("/tautulli", s.handleTautulli)
+	s.app.Post("/webhook/tautulli", s.handleTautulli)
 	s.app.Post("/asr", s.handleASR)
 	s.app.Post("/batch", s.handleBatch)
 	s.app.Post("/detect-language", s.handleDetectLanguage)
