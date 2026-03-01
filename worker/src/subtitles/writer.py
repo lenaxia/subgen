@@ -10,7 +10,7 @@ Extracted from subgen.py:
 import os
 import logging
 import sys
-from typing import Optional, Any
+from typing import Optional, Any, Iterator
 from pathlib import Path
 
 # Add parent directory to path to import language_code
@@ -74,27 +74,35 @@ def generate_subtitle_path(
     return "".join(parts)
 
 
-def write_lrc(segments: Any, output_path: str, append_footer: bool = False) -> None:
+def write_lrc(segments: Iterator[Any], output_path: str, append_footer: bool = False) -> int:
     """
-    Write LRC subtitle file.
+    Write LRC subtitle file, consuming segments from an iterator.
 
     Extracted from: subgen.py:1218-1225
 
     LRC format: [MM:SS.xx]Text
 
+    Segments are consumed one at a time from the iterator to avoid
+    materialising the full segment list in memory for long files.
+
     Args:
-        segments: List of transcription segments
+        segments: Iterator of transcription segments (consumed once)
         output_path: Path to write LRC file
         append_footer: Whether to append generation footer
+
+    Returns:
+        Number of segments written
 
     Raises:
         SubtitleGenerationError: If writing fails
     """
     temp_path = output_path + ".tmp"
+    count = 0
 
     try:
         with open(temp_path, "w", encoding="utf-8") as f:
             for segment in segments:
+                count += 1
                 minutes, seconds = divmod(int(segment.start), 60)
                 fraction = int((segment.start - int(segment.start)) * 100)
 
@@ -108,7 +116,7 @@ def write_lrc(segments: Any, output_path: str, append_footer: bool = False) -> N
 
         # Atomic rename
         os.replace(temp_path, output_path)
-        logger.info(f"LRC subtitle written: {output_path}")
+        logger.info(f"LRC subtitle written: {output_path} ({count} segments)")
 
     except Exception as e:
         logger.error(f"Failed to write LRC: {e}", exc_info=True)
@@ -117,28 +125,37 @@ def write_lrc(segments: Any, output_path: str, append_footer: bool = False) -> N
             os.remove(temp_path)
         raise SubtitleGenerationError(f"Failed to write LRC: {e}")
 
+    return count
+
 
 def write_srt(
-    result: Any,  # Transcription result with segments
+    segments: Iterator[Any],
     output_path: str,
     word_level_highlight: bool = False,
     append_footer: bool = False,
-) -> None:
+) -> int:
     """
-    Write SRT subtitle file.
+    Write SRT subtitle file, consuming segments from an iterator.
 
     Manually generates SRT format from segments (compatible with faster-whisper).
 
+    Segments are consumed one at a time from the iterator to avoid
+    materialising the full segment list in memory for long files.
+
     Args:
-        result: Transcription result with segments attribute
+        segments: Iterator of transcription segments (consumed once)
         output_path: Path to write SRT file
         word_level_highlight: Enable word-level timestamps (not implemented for faster-whisper)
         append_footer: Whether to append generation footer
+
+    Returns:
+        Number of segments written
 
     Raises:
         SubtitleGenerationError: If writing fails
     """
     temp_path = output_path + ".tmp"
+    count = 0
 
     try:
 
@@ -151,9 +168,11 @@ def write_srt(
             return f"{hours:02d}:{minutes:02d}:{secs:02d},{millis:03d}"
 
         with open(temp_path, "w", encoding="utf-8") as f:
-            for i, segment in enumerate(result.segments, start=1):
+            for segment in segments:
+                count += 1
+
                 # Write segment index
-                f.write(f"{i}\n")
+                f.write(f"{count}\n")
 
                 # Write timestamps
                 start_time = format_timestamp(segment.start)
@@ -166,19 +185,21 @@ def write_srt(
 
             # Append footer if requested
             if append_footer:
-                f.write(f"{len(result.segments) + 1}\n")
+                f.write(f"{count + 1}\n")
                 f.write("99:59:59,999 --> 99:59:59,999\n")
                 f.write("Transcribed by Subgen\n")
 
         # Atomic rename
         os.replace(temp_path, output_path)
-        logger.info(f"SRT subtitle written: {output_path}")
+        logger.info(f"SRT subtitle written: {output_path} ({count} segments)")
 
     except Exception as e:
         logger.error(f"Failed to write SRT: {e}", exc_info=True)
         if os.path.exists(temp_path):
             os.remove(temp_path)
         raise SubtitleGenerationError(f"Failed to write SRT: {e}")
+
+    return count
 
 
 def append_line_to_result(result: Any) -> None:

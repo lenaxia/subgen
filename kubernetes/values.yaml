@@ -131,6 +131,12 @@ controllers:
           MODEL_CLEANUP_DELAY: "30"
           CLEAR_VRAM_ON_COMPLETE: "true"
           
+          # Concurrency — keep at 1 on CPU workers.
+          # Each transcription job can consume 8–12 GB of RAM for long-form
+          # content; allowing 2 concurrent jobs doubles peak RSS and triggers
+          # OOM kills on nodes with 12–16 Gi limits.
+          CONCURRENT_TRANSCRIPTIONS: "1"
+          
           # Subtitle config
           WORD_LEVEL_HIGHLIGHT: "false"
           CUSTOM_REGROUP: "cm_sl=84_sl=42++++++1"

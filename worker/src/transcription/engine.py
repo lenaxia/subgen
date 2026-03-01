@@ -9,7 +9,7 @@ import os
 import logging
 import sys
 import time
-from typing import Optional, Any, List
+from typing import Optional, Any
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -29,7 +29,6 @@ from subtitles.writer import (
     generate_subtitle_path,
     write_lrc,
     write_srt,
-    append_line_to_result,
     SubtitleGenerationError,
 )
 
@@ -64,7 +63,7 @@ class TranscriptionResult:
     segment_count: int = 0
     transcription_time_ms: int = 0
     peak_memory_mb: int = 0
-    segments: Optional[List[Any]] = None  # Whisper segments
+    segments: Optional[list] = None  # Populated only when return_segments=True (ASR path)
 
 
 class TranscriptionEngine:
@@ -86,7 +85,8 @@ class TranscriptionEngine:
         task_type: str,
         force_language: Optional[str],
         options: TranscribeOptions,
-    ) -> TranscriptionResult:
+        return_segments: bool = False,
+    ) -> "TranscriptionResult":
         """
         Transcribe audio/video file to subtitles.
 
@@ -97,9 +97,15 @@ class TranscriptionEngine:
             task_type: "transcribe" or "translate"
             force_language: Forced language code (ISO 639-1) or None
             options: Transcription options
+            return_segments: If True, materialise all segments into result.segments.
+                Set for ASR/bytes-input tasks where the orchestrator cannot read
+                the written subtitle file (different filesystem).  For file-based
+                tasks the orchestrator reads the written file from shared storage,
+                so streaming without materialisation is used to minimise peak RAM.
 
         Returns:
-            TranscriptionResult with subtitle path and metadata
+            TranscriptionResult with subtitle path and metadata.
+            result.segments is populated only when return_segments=True.
         """
         start_time = time.time()
 
@@ -158,8 +164,9 @@ class TranscriptionEngine:
                     temp_file.close()
                     data = temp_file.name
 
-                    # Track temp file for cleanup
-                    temp_files = [temp_file.name]
+                    # Track temp file for cleanup (use append, not reassignment,
+                    # so the bytes-source temp file added above is not orphaned)
+                    temp_files.append(temp_file.name)
                 finally:
                     extracted_audio.close()
 
@@ -172,45 +179,49 @@ class TranscriptionEngine:
             # if options.custom_regroup and options.custom_regroup.lower() != "default":
             #     args["regroup"] = options.custom_regroup
 
-            # Transcribe
+            # faster-whisper returns (segments_generator, info) where segments_generator
+            # is a lazy iterator. We deliberately do NOT call list() by default —
+            # consuming the generator eagerly would materialise all segment tensors
+            # simultaneously, which for a 2-hour film can add several GB of peak RSS.
             lang_code = force_language if force_language else None
-            # faster-whisper returns (segments_generator, info)
             segments_generator, info = self.model.transcribe(
                 data, language=lang_code, task=task_type, **args
             )
 
-            # Convert generator to list to get segments
-            segments = list(segments_generator)
-
-            # Create a result object compatible with stable-whisper expectations
-            class FasterWhisperResult:
-                def __init__(self, segments, language):
-                    self.segments = segments
-                    self.language = language
-
-            result = FasterWhisperResult(segments, info.language)
-
-            # Append newlines to segments
-            append_line_to_result(result)
-
-            # Determine detected language
+            # Determine detected language from the TranscriptionInfo returned by
+            # faster-whisper (available immediately, before consuming segments).
             detected_lang: LanguageCode
             if force_language:
-                # Convert string to LanguageCode if provided
                 if isinstance(force_language, str):
                     detected_lang = LanguageCode.from_iso_639_1(force_language)
                 else:
                     detected_lang = force_language  # Already a LanguageCode
             else:
-                detected_lang = LanguageCode.from_string(result.language)
+                detected_lang = LanguageCode.from_string(info.language)
 
-            # Generate subtitle file
-            if is_audio_file and options.lrc_for_audio:
-                # Write LRC for audio files
-                subtitle_path = file_name + ".lrc"
-                write_lrc(result.segments, subtitle_path, append_footer=options.append_footer)
+            if return_segments:
+                # ASR / bytes-input path: the orchestrator cannot read the written
+                # subtitle file (worker and orchestrator have separate filesystems
+                # for /tmp).  Materialise segments so they can be returned in the
+                # gRPC response.  This is only triggered for short audio clips
+                # (Bazarr sends ≤30 s samples), so the RAM cost is bounded.
+                all_segments = list(segments_generator)
+                segments_iter: Any = iter(all_segments)
             else:
-                # Write SRT for video files
+                # File-based path: orchestrator reads the subtitle file from shared
+                # NFS storage.  Stream segment-by-segment to avoid holding the full
+                # segment list in RAM.
+                all_segments = None
+                segments_iter = segments_generator
+
+            # Generate subtitle file — the writer streams segment-by-segment and
+            # returns the total count.
+            if is_audio_file and options.lrc_for_audio:
+                subtitle_path = file_name + ".lrc"
+                segment_count = write_lrc(
+                    segments_iter, subtitle_path, append_footer=options.append_footer
+                )
+            else:
                 subtitle_path = generate_subtitle_path(
                     file_path,
                     detected_lang,
@@ -219,8 +230,8 @@ class TranscriptionEngine:
                     show_model=options.show_model_in_filename,
                     format="srt",
                 )
-                write_srt(
-                    result,
+                segment_count = write_srt(
+                    segments_iter,
                     subtitle_path,
                     word_level_highlight=options.word_level_highlight,
                     append_footer=options.append_footer,
@@ -234,9 +245,9 @@ class TranscriptionEngine:
                 subtitle_path=subtitle_path,
                 detected_language=detected_lang.to_iso_639_1(),
                 duration_seconds=duration,
-                segment_count=len(result.segments),
+                segment_count=segment_count,
                 transcription_time_ms=int(duration * 1000),
-                segments=result.segments,
+                segments=all_segments,
             )
 
         except Exception as e:

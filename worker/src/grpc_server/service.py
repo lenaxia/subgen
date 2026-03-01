@@ -269,12 +269,19 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     options.custom_regroup = request.options.custom_regroup
 
             # Perform transcription
+            # For bytes-input (ASR), set return_segments=True so the segment data
+            # is included in the result and can be sent back in the gRPC response.
+            # The orchestrator cannot read the worker's local /tmp subtitle file,
+            # so it depends on segments in the response for in-memory formatting.
+            # For file-based input, the orchestrator reads from shared NFS storage,
+            # so streaming without materialisation is preferred to save RAM.
             logger.info(f"Starting transcription (source_type={source_type})")
             result = self.engine.transcribe(
                 source=source,
                 task_type=task_type,
                 force_language=request.force_language if request.force_language else None,
                 options=options,
+                return_segments=(source_type == "bytes"),
             )
 
             # Update stats
@@ -299,7 +306,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     peak_memory_mb=result.peak_memory_mb,
                 )
 
-                # Convert segments to protobuf format
+                # Convert segments to protobuf format.
+                # result.segments is populated only when return_segments=True
+                # (i.e. bytes/ASR input).  For file-based input it is None and
+                # the orchestrator reads segments from the written subtitle file.
                 segments = []
                 if result.segments:
                     for segment in result.segments:

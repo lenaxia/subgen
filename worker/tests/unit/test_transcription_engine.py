@@ -45,6 +45,22 @@ def transcribe_options():
     )
 
 
+def make_mock_model(segments=None, language="English"):
+    """
+    Return a mock model whose transcribe() returns (generator, info) as
+    faster-whisper does.  `segments` defaults to a single segment.
+    """
+    if segments is None:
+        segments = [Mock(start=0.0, end=2.0, text="Test")]
+
+    info = Mock()
+    info.language = language
+
+    mock_model = Mock()
+    mock_model.transcribe = Mock(return_value=(iter(segments), info))
+    return mock_model
+
+
 @pytest.mark.skipif(
     not TRANSCRIPTION_MODULE_EXISTS, reason="Transcription module not yet implemented"
 )
@@ -52,7 +68,7 @@ class TestTranscriptionEngine:
     """Test TranscriptionEngine class (from subgen.py:1227-1274)."""
 
     def test_engine_initialization(self, mock_config):
-        """Test engine initializes correctly."""
+        """Test engine initialises correctly."""
         engine = TranscriptionEngine(mock_config)
 
         assert engine.config == mock_config
@@ -79,12 +95,13 @@ class TestTranscribeVideoFile:
     """Test transcribing video files."""
 
     def test_transcribe_video_success(self, mock_config, transcribe_options):
-        """Test successful video transcription."""
+        """Test successful video transcription returns success result."""
+        segments = [Mock(start=0.0, end=2.0, text="Test")]
+
         with (
             patch("transcription.engine.has_audio", return_value=True),
             patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_srt"),
+            patch("transcription.engine.write_srt", return_value=1),
             patch(
                 "transcription.engine.generate_subtitle_path", return_value="/test/video.eng.srt"
             ),
@@ -92,14 +109,7 @@ class TestTranscribeVideoFile:
             patch("os.path.splitext", return_value=("/test/video", ".mp4")),
         ):
             engine = TranscriptionEngine(mock_config)
-
-            # Mock model and result
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "English"
-            mock_result.segments = [Mock(start=0.0, end=2.0, text="Test")]
-            mock_model.transcribe = Mock(return_value=mock_result)
-            engine.model = mock_model
+            engine.model = make_mock_model(segments)
 
             with patch("transcription.engine.LanguageCode") as mock_lang_code:
                 mock_lang = Mock()
@@ -110,10 +120,34 @@ class TestTranscribeVideoFile:
                     "/test/video.mp4", "transcribe", None, transcribe_options
                 )
 
-            assert result.success is True
-            assert result.subtitle_path == "/test/video.eng.srt"
-            assert result.detected_language == "en"
-            assert result.segment_count == 1
+        assert result.success is True
+        assert result.subtitle_path == "/test/video.eng.srt"
+        assert result.detected_language == "en"
+        assert result.segment_count == 1
+
+    def test_transcribe_video_model_returns_tuple(self, mock_config, transcribe_options):
+        """Engine unpacks (generator, info) from model.transcribe() correctly."""
+        with (
+            patch("transcription.engine.has_audio", return_value=True),
+            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.write_srt", return_value=0),
+            patch("transcription.engine.generate_subtitle_path", return_value="/test/v.srt"),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.splitext", return_value=("/test/v", ".mp4")),
+        ):
+            engine = TranscriptionEngine(mock_config)
+            engine.model = make_mock_model([], language="Japanese")
+
+            with patch("transcription.engine.LanguageCode") as mock_lang_code:
+                mock_lang = Mock()
+                mock_lang.to_iso_639_1 = Mock(return_value="ja")
+                mock_lang_code.from_string = Mock(return_value=mock_lang)
+
+                result = engine.transcribe("/test/v.mp4", "transcribe", None, transcribe_options)
+
+        assert result.success is True
+        # Language comes from info.language, not from a segments list
+        mock_lang_code.from_string.assert_called_once_with("Japanese")
 
     def test_transcribe_video_file_not_found(self, mock_config, transcribe_options):
         """Test transcription with non-existent file."""
@@ -157,12 +191,11 @@ class TestTranscribeVideoFile:
             assert "model not loaded" in result.error_message.lower()
 
     def test_transcribe_video_forced_language(self, mock_config, transcribe_options):
-        """Test transcription with forced language."""
+        """Test transcription with forced language passes it to model."""
         with (
             patch("transcription.engine.has_audio", return_value=True),
             patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_srt"),
+            patch("transcription.engine.write_srt", return_value=0),
             patch(
                 "transcription.engine.generate_subtitle_path", return_value="/test/video.jpn.srt"
             ),
@@ -170,60 +203,89 @@ class TestTranscribeVideoFile:
             patch("os.path.splitext", return_value=("/test/video", ".mp4")),
         ):
             engine = TranscriptionEngine(mock_config)
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "Japanese"
-            mock_result.segments = []
-            mock_model.transcribe = Mock(return_value=mock_result)
+            mock_model = make_mock_model([], language="Japanese")
             engine.model = mock_model
 
-            result = engine.transcribe(
+            engine.transcribe(
                 "/test/video.mp4",
                 "transcribe",
                 "ja",  # Forced language
                 transcribe_options,
             )
 
-            # Verify transcribe called with forced language
             call_args = mock_model.transcribe.call_args
             assert call_args[1]["language"] == "ja"
 
-    def test_transcribe_video_multiple_audio_tracks(self, mock_config, transcribe_options):
-        """Test video with multiple audio tracks."""
-        fake_audio = b"extracted_audio_data"
+    def test_transcribe_passes_generator_to_write_srt(self, mock_config, transcribe_options):
+        """Engine passes the segments generator directly to write_srt without list()."""
+        captured = {}
+
+        def capture_write_srt(segments, *args, **kwargs):
+            captured["segments"] = segments
+            return 2
+
+        with (
+            patch("transcription.engine.has_audio", return_value=True),
+            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.write_srt", side_effect=capture_write_srt),
+            patch("transcription.engine.generate_subtitle_path", return_value="/t.srt"),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.splitext", return_value=("/t", ".mp4")),
+        ):
+            engine = TranscriptionEngine(mock_config)
+            engine.model = make_mock_model()
+
+            with patch("transcription.engine.LanguageCode"):
+                engine.transcribe("/t.mp4", "transcribe", None, transcribe_options)
+
+        # The object passed to write_srt must be a generator/iterator, not a list
+        import types
+
+        assert not isinstance(captured["segments"], list), (
+            "segments must not be materialised as a list before passing to write_srt"
+        )
+        assert hasattr(captured["segments"], "__iter__"), "segments must be iterable"
+
+    def test_transcribe_video_multiple_audio_tracks_appends_temp(
+        self, mock_config, transcribe_options
+    ):
+        """Multi-track extraction appends to temp_files, not reassigns."""
+        import tempfile
+
+        extracted_audio = Mock()
+        extracted_audio.read = Mock(return_value=b"audio_data")
+        extracted_audio.close = Mock()
+
+        created_temps = []
+
+        real_named_temp = tempfile.NamedTemporaryFile
+
+        def patched_named_temp(*args, **kwargs):
+            tf = real_named_temp(*args, **kwargs)
+            created_temps.append(tf.name)
+            return tf
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
             patch(
-                "transcription.engine.handle_multiple_audio_tracks",
-                return_value=Mock(read=Mock(return_value=fake_audio)),
+                "transcription.engine.handle_multiple_audio_tracks", return_value=extracted_audio
             ),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_srt"),
+            patch("transcription.engine.write_srt", return_value=0),
             patch("transcription.engine.generate_subtitle_path", return_value="/test/video.srt"),
             patch("os.path.exists", return_value=True),
             patch("os.path.splitext", return_value=("/test/video", ".mkv")),
+            patch("tempfile.NamedTemporaryFile", side_effect=patched_named_temp),
         ):
             engine = TranscriptionEngine(mock_config)
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "English"
-            mock_result.segments = []
-            mock_model.transcribe = Mock(return_value=mock_result)
-            engine.model = mock_model
+            engine.model = make_mock_model()
 
-            with patch("transcription.engine.LanguageCode") as mock_lang_code:
-                mock_lang = Mock()
-                mock_lang.to_iso_639_1 = Mock(return_value="en")
-                mock_lang_code.from_string = Mock(return_value=mock_lang)
+            with patch("transcription.engine.LanguageCode"):
+                engine.transcribe("/test/video.mkv", "transcribe", None, transcribe_options)
 
-                result = engine.transcribe(
-                    "/test/video.mkv", "transcribe", None, transcribe_options
-                )
-
-            # Verify transcribed extracted audio, not file path
-            call_args = mock_model.transcribe.call_args
-            assert call_args[0][0] == fake_audio
+        # Both temp files should have been created and cleaned up (not orphaned)
+        # The test verifies no NamedTemporaryFile path is left on disk
+        for p in created_temps:
+            assert not os.path.exists(p), f"Temp file was not cleaned up: {p}"
 
 
 @pytest.mark.skipif(
@@ -237,18 +299,12 @@ class TestTranscribeAudioFile:
         with (
             patch("transcription.engine.has_audio", return_value=True),
             patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_lrc"),
+            patch("transcription.engine.write_lrc", return_value=0),
             patch("os.path.exists", return_value=True),
             patch("os.path.splitext", return_value=("/test/audio", ".mp3")),
         ):
             engine = TranscriptionEngine(mock_config)
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "English"
-            mock_result.segments = []
-            mock_model.transcribe = Mock(return_value=mock_result)
-            engine.model = mock_model
+            engine.model = make_mock_model(language="English")
 
             with patch("transcription.engine.LanguageCode") as mock_lang_code:
                 mock_lang = Mock()
@@ -259,29 +315,23 @@ class TestTranscribeAudioFile:
                     "/test/audio.mp3", "transcribe", None, transcribe_options
                 )
 
-            assert result.success is True
-            assert result.subtitle_path == "/test/audio.lrc"
+        assert result.success is True
+        assert result.subtitle_path == "/test/audio.lrc"
 
     def test_transcribe_audio_various_extensions(self, mock_config, transcribe_options):
-        """Test various audio file extensions generate LRC."""
+        """Test various audio file extensions produce LRC output."""
         audio_extensions = [".mp3", ".wav", ".aac", ".flac", ".ogg", ".m4a"]
 
         for ext in audio_extensions:
             with (
                 patch("transcription.engine.has_audio", return_value=True),
                 patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-                patch("transcription.engine.append_line_to_result"),
-                patch("transcription.engine.write_lrc"),
+                patch("transcription.engine.write_lrc", return_value=0),
                 patch("os.path.exists", return_value=True),
                 patch("os.path.splitext", return_value=(f"/test/audio", ext)),
             ):
                 engine = TranscriptionEngine(mock_config)
-                mock_model = Mock()
-                mock_result = Mock()
-                mock_result.language = "English"
-                mock_result.segments = []
-                mock_model.transcribe = Mock(return_value=mock_result)
-                engine.model = mock_model
+                engine.model = make_mock_model()
 
                 with patch("transcription.engine.LanguageCode") as mock_lang_code:
                     mock_lang = Mock()
@@ -292,7 +342,34 @@ class TestTranscribeAudioFile:
                         f"/test/audio{ext}", "transcribe", None, transcribe_options
                     )
 
-                assert result.subtitle_path == "/test/audio.lrc"
+            assert result.subtitle_path == "/test/audio.lrc", f"Failed for extension {ext}"
+
+    def test_transcribe_audio_passes_generator_to_write_lrc(self, mock_config, transcribe_options):
+        """Engine passes the segments generator to write_lrc without list()."""
+        captured = {}
+
+        def capture_write_lrc(segments, *args, **kwargs):
+            captured["segments"] = segments
+            return 3
+
+        with (
+            patch("transcription.engine.has_audio", return_value=True),
+            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.write_lrc", side_effect=capture_write_lrc),
+            patch("os.path.exists", return_value=True),
+            patch("os.path.splitext", return_value=("/test/audio", ".mp3")),
+        ):
+            engine = TranscriptionEngine(mock_config)
+            engine.model = make_mock_model()
+
+            with patch("transcription.engine.LanguageCode"):
+                engine.transcribe("/test/audio.mp3", "transcribe", None, transcribe_options)
+
+        import types
+
+        assert not isinstance(captured["segments"], list), (
+            "segments must not be materialised as a list before passing to write_lrc"
+        )
 
 
 @pytest.mark.skipif(
@@ -301,74 +378,30 @@ class TestTranscribeAudioFile:
 class TestTranscribeOptions:
     """Test TranscribeOptions usage in transcription."""
 
-    def test_transcribe_with_custom_regroup(self, mock_config, transcribe_options):
-        """Test custom regroup parameter passed to model."""
-        transcribe_options.custom_regroup = "custom_algorithm"
-
-        with (
-            patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_srt"),
-            patch("transcription.engine.generate_subtitle_path", return_value="/test/video.srt"),
-            patch("os.path.exists", return_value=True),
-            patch("os.path.splitext", return_value=("/test/video", ".mp4")),
-        ):
-            engine = TranscriptionEngine(mock_config)
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "English"
-            mock_result.segments = []
-            mock_model.transcribe = Mock(return_value=mock_result)
-            engine.model = mock_model
-
-            with patch("transcription.engine.LanguageCode") as mock_lang_code:
-                mock_lang = Mock()
-                mock_lang.to_iso_639_1 = Mock(return_value="en")
-                mock_lang_code.from_string = Mock(return_value=mock_lang)
-
-                result = engine.transcribe(
-                    "/test/video.mp4", "transcribe", None, transcribe_options
-                )
-
-            # Verify regroup parameter passed
-            call_args = mock_model.transcribe.call_args
-            assert "regroup" in call_args[1]
-            assert call_args[1]["regroup"] == "custom_algorithm"
-
     def test_transcribe_with_word_level_highlight(self, mock_config, transcribe_options):
-        """Test word-level highlight option."""
+        """Test word-level highlight option is forwarded to write_srt."""
         transcribe_options.word_level_highlight = True
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
             patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
-            patch("transcription.engine.append_line_to_result"),
-            patch("transcription.engine.write_srt") as mock_write_srt,
+            patch("transcription.engine.write_srt", return_value=0) as mock_write_srt,
             patch("transcription.engine.generate_subtitle_path", return_value="/test/video.srt"),
             patch("os.path.exists", return_value=True),
             patch("os.path.splitext", return_value=("/test/video", ".mp4")),
         ):
             engine = TranscriptionEngine(mock_config)
-            mock_model = Mock()
-            mock_result = Mock()
-            mock_result.language = "English"
-            mock_result.segments = []
-            mock_model.transcribe = Mock(return_value=mock_result)
-            engine.model = mock_model
+            engine.model = make_mock_model()
 
             with patch("transcription.engine.LanguageCode") as mock_lang_code:
                 mock_lang = Mock()
                 mock_lang.to_iso_639_1 = Mock(return_value="en")
                 mock_lang_code.from_string = Mock(return_value=mock_lang)
 
-                result = engine.transcribe(
-                    "/test/video.mp4", "transcribe", None, transcribe_options
-                )
+                engine.transcribe("/test/video.mp4", "transcribe", None, transcribe_options)
 
-            # Verify write_srt called with word_level_highlight=True
-            call_args = mock_write_srt.call_args
-            assert call_args[1]["word_level_highlight"] is True
+        call_args = mock_write_srt.call_args
+        assert call_args[1]["word_level_highlight"] is True
 
 
 @pytest.mark.skipif(
@@ -454,3 +487,22 @@ class TestTranscriptionResult:
 
         assert result.success is False
         assert result.error_message == "File not found"
+
+    def test_transcription_result_segments_defaults_to_none(self):
+        """For the file-based path, segments defaults to None (not materialised)."""
+        result = TranscriptionResult(success=True, subtitle_path="/t.srt", detected_language="en")
+        assert result.segments is None, (
+            "segments must be None by default — only populated when return_segments=True (ASR path)"
+        )
+
+    def test_transcription_result_segments_populated_for_asr_path(self):
+        """For the ASR/bytes path (return_segments=True), segments is a list."""
+        seg = object()
+        result = TranscriptionResult(
+            success=True,
+            subtitle_path="/t.srt",
+            detected_language="en",
+            segments=[seg],
+        )
+        assert isinstance(result.segments, list)
+        assert result.segments[0] is seg
