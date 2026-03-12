@@ -78,9 +78,12 @@ data:
   # Concurrency settings
   # gRPC thread pool: 10 total threads (default)
   # Formula: CONCURRENT_TRANSCRIPTIONS * 2 + 2 system buffer
-  # With 2 concurrent jobs: 2*2 + 2 = 6 used, 4 buffer
+  # With 1 concurrent job: 1*2 + 2 = 4 used, 6 buffer
+  # Set to 1 on CPU workers: each transcription job can consume 8–12 GB of
+  # RAM for long-form content; 2 concurrent jobs would double peak RSS and
+  # reliably trigger OOM kills on nodes with 12–16 Gi limits.
   MAX_WORKERS: "10"                # Total gRPC threads per worker
-  CONCURRENT_TRANSCRIPTIONS: "2"   # Max concurrent transcription jobs
+  CONCURRENT_TRANSCRIPTIONS: "1"   # Max concurrent transcription jobs
   
   # Subtitle configuration
   WORD_LEVEL_HIGHLIGHT: "false"
