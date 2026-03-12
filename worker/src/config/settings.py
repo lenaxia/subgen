@@ -410,6 +410,16 @@ class SkipConfig(BaseSettings):
         default=False,
         description="Skip files with unknown language",
     )
+    target_languages: str = Field(
+        default="",
+        validation_alias="TARGET_LANGUAGES",
+        description="Target output languages for multi-language subtitle generation (pipe or comma-separated)",
+    )
+    transcribe_preferred: bool = Field(
+        default=True,
+        validation_alias="TRANSCRIBE_PREFERRED",
+        description="Transcribe when audio matches preferred language (vs always translate)",
+    )
 
     def get_skip_subtitle_languages(self) -> List[str]:
         """Get skip_subtitle_languages as a list."""
@@ -422,6 +432,10 @@ class SkipConfig(BaseSettings):
     def get_preferred_audio_languages(self) -> List[str]:
         """Get preferred_audio_languages as a list."""
         return self._parse_language_string(self.preferred_audio_languages)
+
+    def get_target_languages(self) -> List[str]:
+        """Get target_languages as a list."""
+        return self._parse_language_string(self.target_languages)
 
     @staticmethod
     def _parse_language_string(v: str) -> List[str]:

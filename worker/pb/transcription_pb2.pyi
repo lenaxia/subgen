@@ -9,7 +9,7 @@ from typing import ClassVar as _ClassVar, Optional as _Optional, Union as _Union
 DESCRIPTOR: _descriptor.FileDescriptor
 
 class TranscribeRequest(_message.Message):
-    __slots__ = ("file_path", "audio_content", "task_type", "force_language", "options", "metadata")
+    __slots__ = ("file_path", "audio_content", "task_type", "force_language", "options", "metadata", "target_languages", "transcribe_preferred", "preferred_audio_languages")
     class MetadataEntry(_message.Message):
         __slots__ = ("key", "value")
         KEY_FIELD_NUMBER: _ClassVar[int]
@@ -23,13 +23,19 @@ class TranscribeRequest(_message.Message):
     FORCE_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     OPTIONS_FIELD_NUMBER: _ClassVar[int]
     METADATA_FIELD_NUMBER: _ClassVar[int]
+    TARGET_LANGUAGES_FIELD_NUMBER: _ClassVar[int]
+    TRANSCRIBE_PREFERRED_FIELD_NUMBER: _ClassVar[int]
+    PREFERRED_AUDIO_LANGUAGES_FIELD_NUMBER: _ClassVar[int]
     file_path: str
     audio_content: bytes
     task_type: str
     force_language: str
     options: TranscribeOptions
     metadata: _containers.ScalarMap[str, str]
-    def __init__(self, file_path: _Optional[str] = ..., audio_content: _Optional[bytes] = ..., task_type: _Optional[str] = ..., force_language: _Optional[str] = ..., options: _Optional[_Union[TranscribeOptions, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ...) -> None: ...
+    target_languages: _containers.RepeatedScalarFieldContainer[str]
+    transcribe_preferred: bool
+    preferred_audio_languages: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, file_path: _Optional[str] = ..., audio_content: _Optional[bytes] = ..., task_type: _Optional[str] = ..., force_language: _Optional[str] = ..., options: _Optional[_Union[TranscribeOptions, _Mapping]] = ..., metadata: _Optional[_Mapping[str, str]] = ..., target_languages: _Optional[_Iterable[str]] = ..., transcribe_preferred: bool = ..., preferred_audio_languages: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TranscribeOptions(_message.Message):
     __slots__ = ("whisper_model", "whisper_threads", "word_level_highlight", "custom_regroup", "lrc_for_audio", "custom_prompt", "append_footer", "subtitle_language_name", "show_model_in_filename", "show_subgen_in_filename", "use_prompt", "extra_kwargs", "device", "compute_type")
@@ -81,20 +87,24 @@ class SubtitleSegment(_message.Message):
     def __init__(self, start: _Optional[float] = ..., end: _Optional[float] = ..., text: _Optional[str] = ...) -> None: ...
 
 class TranscribeResponse(_message.Message):
-    __slots__ = ("success", "subtitle_path", "detected_language", "error_message", "stats", "segments")
+    __slots__ = ("success", "subtitle_path", "detected_language", "error_message", "stats", "segments", "subtitle_paths", "output_languages")
     SUCCESS_FIELD_NUMBER: _ClassVar[int]
     SUBTITLE_PATH_FIELD_NUMBER: _ClassVar[int]
     DETECTED_LANGUAGE_FIELD_NUMBER: _ClassVar[int]
     ERROR_MESSAGE_FIELD_NUMBER: _ClassVar[int]
     STATS_FIELD_NUMBER: _ClassVar[int]
     SEGMENTS_FIELD_NUMBER: _ClassVar[int]
+    SUBTITLE_PATHS_FIELD_NUMBER: _ClassVar[int]
+    OUTPUT_LANGUAGES_FIELD_NUMBER: _ClassVar[int]
     success: bool
     subtitle_path: str
     detected_language: str
     error_message: str
     stats: TranscriptionStats
     segments: _containers.RepeatedCompositeFieldContainer[SubtitleSegment]
-    def __init__(self, success: bool = ..., subtitle_path: _Optional[str] = ..., detected_language: _Optional[str] = ..., error_message: _Optional[str] = ..., stats: _Optional[_Union[TranscriptionStats, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SubtitleSegment, _Mapping]]] = ...) -> None: ...
+    subtitle_paths: _containers.RepeatedScalarFieldContainer[str]
+    output_languages: _containers.RepeatedScalarFieldContainer[str]
+    def __init__(self, success: bool = ..., subtitle_path: _Optional[str] = ..., detected_language: _Optional[str] = ..., error_message: _Optional[str] = ..., stats: _Optional[_Union[TranscriptionStats, _Mapping]] = ..., segments: _Optional[_Iterable[_Union[SubtitleSegment, _Mapping]]] = ..., subtitle_paths: _Optional[_Iterable[str]] = ..., output_languages: _Optional[_Iterable[str]] = ...) -> None: ...
 
 class TranscriptionStats(_message.Message):
     __slots__ = ("duration_seconds", "segment_count", "model_load_time_ms", "transcription_time_ms", "peak_memory_mb")

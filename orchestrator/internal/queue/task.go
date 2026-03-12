@@ -58,6 +58,11 @@ type Task struct {
 	TaskType      string // "transcribe" or "translate"
 	ForceLanguage string // ISO 639-1 code or empty
 
+	// Multi-language Options (EPIC_10)
+	TargetLanguages         []string // Target output languages for multi-language generation
+	TranscribePreferred     bool     // Transcribe when audio matches preferred language
+	PreferredAudioLanguages []string // Preferred audio languages for transcribe_preferred logic
+
 	// Media Server Metadata (for refresh after completion)
 	PlexItemID     string // Plex rating key
 	PlexServer     string // Plex server URL

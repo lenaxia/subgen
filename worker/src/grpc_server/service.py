@@ -11,7 +11,7 @@ import glob
 import logging
 import time
 import os
-from typing import Optional
+from typing import Optional, List, Tuple
 
 import grpc
 import psutil
@@ -171,6 +171,198 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
 
             elapsed = time.time() - self._last_progress_timestamp
             return elapsed > self._progress_timeout_seconds
+
+    def _transcribe_multi_language(
+        self,
+        source: str,
+        file_path: str,
+        target_languages: List[str],
+        preferred_languages: List[str],
+        transcribe_preferred: bool,
+        force_language: Optional[str],
+        options: TranscribeOptions,
+        start_time: float,
+    ) -> transcription_pb2.TranscribeResponse:
+        """
+        Handle multi-language subtitle generation.
+
+        Generates subtitles in multiple target languages based on language policy.
+        Only works with file paths (not bytes).
+        """
+        logger.info(
+            f"Multi-language transcription: targets={target_languages}, preferred={preferred_languages}"
+        )
+
+        subtitle_paths: List[str] = []
+        output_languages: List[str] = []
+        detected_language = ""
+        total_segments = 0
+
+        try:
+            # Load model
+            model = self.model_manager.load()
+            self.engine.model = model
+
+            # Detect audio language first (needed for policy decision)
+            detection_result = self.engine.detect_language(
+                source, sample_length=30, sample_offset=0
+            )
+            audio_language = (
+                detection_result.language_code.lower() if detection_result.success else ""
+            )
+
+            if not audio_language:
+                logger.warning("Could not detect audio language, defaulting to transcribe")
+                audio_language = force_language.lower() if force_language else ""
+
+            detected_language = audio_language
+            logger.info(f"Detected audio language: {audio_language}")
+
+            # Determine output languages based on policy
+            output_tasks = self._determine_output_languages(
+                audio_language=audio_language,
+                target_languages=target_languages,
+                preferred_languages=[lang.lower() for lang in preferred_languages],
+                transcribe_preferred=transcribe_preferred,
+            )
+
+            logger.info(f"Output tasks: {output_tasks}")
+
+            # Generate subtitle for each output language
+            for output_lang, task_type in output_tasks:
+                output_lang_lower = output_lang.lower()
+
+                # Skip check for specific output language
+                skip_result = self.skip_checker.check(file_path, output_language=output_lang_lower)
+                if skip_result.should_skip:
+                    logger.info(f"Skipping {output_lang_lower}: {skip_result.details}")
+                    continue
+
+                # Set target language for filename
+                options_copy = TranscribeOptions(
+                    whisper_model=options.whisper_model,
+                    whisper_threads=options.whisper_threads,
+                    word_level_highlight=options.word_level_highlight,
+                    custom_regroup=options.custom_regroup,
+                    lrc_for_audio=options.lrc_for_audio,
+                    custom_prompt=options.custom_prompt,
+                    append_footer=options.append_footer,
+                    subtitle_language_name=options.subtitle_language_name,
+                    show_model_in_filename=options.show_model_in_filename,
+                    show_subgen_in_filename=options.show_subgen_in_filename,
+                    target_language=output_lang_lower,
+                )
+
+                # Perform transcription
+                result = self.engine.transcribe(
+                    source=source,
+                    task_type=task_type,
+                    force_language=force_language,
+                    options=options_copy,
+                    return_segments=False,
+                    progress_callback=self._update_progress,
+                )
+
+                if result.success:
+                    subtitle_paths.append(result.subtitle_path)
+                    output_languages.append(output_lang_lower)
+                    total_segments += result.segment_count
+                    logger.info(f"Generated {output_lang_lower} subtitle: {result.subtitle_path}")
+                else:
+                    logger.error(
+                        f"Failed to generate {output_lang_lower} subtitle: {result.error_message}"
+                    )
+
+            # Update stats
+            self.stats["jobs_processed"] += 1
+            self.stats["last_job_timestamp"] = int(time.time())
+            processing_time = time.time() - start_time
+
+            if subtitle_paths:
+                self.stats["consecutive_errors"] = 0
+                logger.info(
+                    f"Multi-language transcription completed: {len(subtitle_paths)} files "
+                    f"({total_segments} total segments in {processing_time:.2f}s)"
+                )
+
+                return transcription_pb2.TranscribeResponse(
+                    success=True,
+                    subtitle_path=subtitle_paths[0] if subtitle_paths else "",
+                    detected_language=detected_language,
+                    subtitle_paths=subtitle_paths,
+                    output_languages=output_languages,
+                    stats=transcription_pb2.TranscriptionStats(
+                        duration_seconds=processing_time,
+                        segment_count=total_segments,
+                        transcription_time_ms=int(processing_time * 1000),
+                    ),
+                )
+            else:
+                return transcription_pb2.TranscribeResponse(
+                    success=True,
+                    subtitle_path="",
+                    detected_language=detected_language,
+                    subtitle_paths=[],
+                    output_languages=[],
+                )
+
+        except Exception as e:
+            logger.exception(f"Multi-language transcription error: {e}")
+            return transcription_pb2.TranscribeResponse(
+                success=False,
+                error_message=f"Multi-language transcription failed: {str(e)}",
+            )
+
+    def _determine_output_languages(
+        self,
+        audio_language: str,
+        target_languages: List[str],
+        preferred_languages: List[str],
+        transcribe_preferred: bool,
+    ) -> List[Tuple[str, str]]:
+        """
+        Determine output languages based on audio language and policy.
+
+        Args:
+            audio_language: Detected audio language (ISO 639-1)
+            target_languages: List of target output languages
+            preferred_languages: List of preferred audio languages
+            transcribe_preferred: Whether to transcribe when audio matches preferred
+
+        Returns:
+            List of (language_code, task_type) tuples
+        """
+        outputs = []
+        audio_lang_lower = audio_language.lower() if audio_language else ""
+        preferred_lower = [lang.lower() for lang in preferred_languages]
+        target_lower = [lang.lower() for lang in target_languages]
+
+        # 1. Transcribe preferred language if enabled and audio matches
+        if transcribe_preferred and audio_lang_lower in preferred_lower:
+            outputs.append((audio_lang_lower, "transcribe"))
+            logger.info(f"Audio {audio_lang_lower} is preferred: will transcribe")
+
+        # 2. Translate to each target language
+        for target_lang in target_lower:
+            if target_lang == audio_lang_lower:
+                # Skip if same as audio (already handled by transcribe)
+                if not (transcribe_preferred and audio_lang_lower in preferred_lower):
+                    # If not transcribing, still need to "translate" to same lang
+                    # This handles the edge case where audio is in target language
+                    # but transcribe_preferred is False
+                    pass
+            else:
+                outputs.append((target_lang, "translate"))
+                logger.info(
+                    f"Target {target_lang} differs from audio {audio_lang_lower}: will translate"
+                )
+
+        # 3. If no targets specified and no transcribe, default to transcribe audio language
+        if not outputs and audio_lang_lower:
+            outputs.append((audio_lang_lower, "transcribe"))
+            logger.info(f"No targets specified: default transcribe {audio_lang_lower}")
+
+        return outputs
 
     def DetectLanguage(
         self, request: transcription_pb2.DetectLanguageRequest, context: grpc.ServicerContext
@@ -359,13 +551,33 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 if request.options.custom_regroup:
                     options.custom_regroup = request.options.custom_regroup
 
-            # Perform transcription
-            # For bytes-input (ASR), set return_segments=True so the segment data
-            # is included in the result and can be sent back in the gRPC response.
-            # The orchestrator cannot read the worker's local /tmp subtitle file,
-            # so it depends on segments in this response for in-memory formatting.
-            # For file-based input, the orchestrator reads from shared NFS storage,
-            # so streaming without materialisation is preferred to save RAM.
+            # Check if multi-language transcription is requested
+            target_languages = list(request.target_languages) if request.target_languages else []
+            preferred_languages = (
+                list(request.preferred_audio_languages) if request.preferred_audio_languages else []
+            )
+            transcribe_preferred = request.transcribe_preferred
+
+            # If no target_languages from request, check config
+            if not target_languages:
+                target_languages = self.config.skip.get_target_languages()
+                preferred_languages = self.config.skip.get_preferred_audio_languages()
+                transcribe_preferred = self.config.skip.transcribe_preferred
+
+            # Multi-language transcription mode
+            if target_languages and source_type == "file":
+                return self._transcribe_multi_language(
+                    source=request.file_path,  # Always string path for multi-language
+                    file_path=request.file_path,
+                    target_languages=target_languages,
+                    preferred_languages=preferred_languages,
+                    transcribe_preferred=transcribe_preferred,
+                    force_language=request.force_language if request.force_language else None,
+                    options=options,
+                    start_time=start_time,
+                )
+
+            # Single-language transcription (existing path)
             logger.info(f"Starting transcription (source_type={source_type})")
 
             # Start progress tracking

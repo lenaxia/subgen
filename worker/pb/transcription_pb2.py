@@ -24,7 +24,7 @@ _sym_db = _symbol_database.Default()
 
 
 
-DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\tsubgen.v1\"\x9a\x02\n\x11TranscribeRequest\x12\x13\n\tfile_path\x18\x01 \x01(\tH\x00\x12\x17\n\raudio_content\x18\x02 \x01(\x0cH\x00\x12\x11\n\ttask_type\x18\x03 \x01(\t\x12\x16\n\x0e\x66orce_language\x18\x04 \x01(\t\x12-\n\x07options\x18\x05 \x01(\x0b\x32\x1c.subgen.v1.TranscribeOptions\x12<\n\x08metadata\x18\x06 \x03(\x0b\x32*.subgen.v1.TranscribeRequest.MetadataEntry\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0e\n\x0c\x61udio_source\"\xd2\x03\n\x11TranscribeOptions\x12\x15\n\rwhisper_model\x18\x01 \x01(\t\x12\x17\n\x0fwhisper_threads\x18\x02 \x01(\x05\x12\x1c\n\x14word_level_highlight\x18\x03 \x01(\x08\x12\x16\n\x0e\x63ustom_regroup\x18\x04 \x01(\t\x12\x15\n\rlrc_for_audio\x18\x05 \x01(\x08\x12\x15\n\rcustom_prompt\x18\x06 \x01(\t\x12\x15\n\rappend_footer\x18\x07 \x01(\x08\x12\x1e\n\x16subtitle_language_name\x18\x08 \x01(\t\x12\x1e\n\x16show_model_in_filename\x18\t \x01(\x08\x12\x1f\n\x17show_subgen_in_filename\x18\n \x01(\x08\x12\x12\n\nuse_prompt\x18\x0b \x01(\x08\x12\x43\n\x0c\x65xtra_kwargs\x18\x0c \x03(\x0b\x32-.subgen.v1.TranscribeOptions.ExtraKwargsEntry\x12\x0e\n\x06\x64\x65vice\x18\r \x01(\t\x12\x14\n\x0c\x63ompute_type\x18\x0e \x01(\t\x1a\x32\n\x10\x45xtraKwargsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\";\n\x0fSubtitleSegment\x12\r\n\x05start\x18\x01 \x01(\x02\x12\x0b\n\x03\x65nd\x18\x02 \x01(\x02\x12\x0c\n\x04text\x18\x03 \x01(\t\"\xca\x01\n\x12TranscribeResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rsubtitle_path\x18\x02 \x01(\t\x12\x19\n\x11\x64\x65tected_language\x18\x03 \x01(\t\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12,\n\x05stats\x18\x05 \x01(\x0b\x32\x1d.subgen.v1.TranscriptionStats\x12,\n\x08segments\x18\x06 \x03(\x0b\x32\x1a.subgen.v1.SubtitleSegment\"\x98\x01\n\x12TranscriptionStats\x12\x18\n\x10\x64uration_seconds\x18\x01 \x01(\x02\x12\x15\n\rsegment_count\x18\x02 \x01(\x05\x12\x1a\n\x12model_load_time_ms\x18\x03 \x01(\x03\x12\x1d\n\x15transcription_time_ms\x18\x04 \x01(\x03\x12\x16\n\x0epeak_memory_mb\x18\x05 \x01(\x03\"\x83\x01\n\x15\x44\x65tectLanguageRequest\x12\x13\n\tfile_path\x18\x01 \x01(\tH\x00\x12\x17\n\raudio_content\x18\x02 \x01(\x0cH\x00\x12\x15\n\rsample_length\x18\x03 \x01(\x05\x12\x15\n\rsample_offset\x18\x04 \x01(\x05\x42\x0e\n\x0c\x61udio_source\"\x82\x01\n\x16\x44\x65tectLanguageResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rlanguage_code\x18\x02 \x01(\t\x12\x15\n\rlanguage_name\x18\x03 \x01(\t\x12\x12\n\nconfidence\x18\x04 \x01(\x02\x12\x15\n\rerror_message\x18\x05 \x01(\t\"\x14\n\x12HealthCheckRequest\"\x8c\x02\n\x13HealthCheckResponse\x12\x35\n\x06status\x18\x01 \x01(\x0e\x32%.subgen.v1.HealthCheckResponse.Status\x12\x11\n\tmemory_mb\x18\x02 \x01(\x03\x12\x14\n\x0cmodel_loaded\x18\x03 \x01(\x08\x12\x16\n\x0ejobs_processed\x18\x04 \x01(\x05\x12\x13\n\x0bjobs_active\x18\x05 \x01(\x05\x12\x0f\n\x07version\x18\x06 \x01(\t\x12\x16\n\x0euptime_seconds\x18\x07 \x01(\x03\"?\n\x06Status\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0b\n\x07HEALTHY\x10\x01\x12\r\n\tUNHEALTHY\x10\x02\x12\x0c\n\x08STARTING\x10\x03\x32\x86\x02\n\x14TranscriptionService\x12I\n\nTranscribe\x12\x1c.subgen.v1.TranscribeRequest\x1a\x1d.subgen.v1.TranscribeResponse\x12U\n\x0e\x44\x65tectLanguage\x12 .subgen.v1.DetectLanguageRequest\x1a!.subgen.v1.DetectLanguageResponse\x12L\n\x0bHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB2Z-github.com/mccloud/subgen/orchestrator/pkg/pb\x90\x01\x01\x62\x06proto3')
+DESCRIPTOR = _descriptor_pool.Default().AddSerializedFile(b'\n\x13transcription.proto\x12\tsubgen.v1\"\xf5\x02\n\x11TranscribeRequest\x12\x13\n\tfile_path\x18\x01 \x01(\tH\x00\x12\x17\n\raudio_content\x18\x02 \x01(\x0cH\x00\x12\x11\n\ttask_type\x18\x03 \x01(\t\x12\x16\n\x0e\x66orce_language\x18\x04 \x01(\t\x12-\n\x07options\x18\x05 \x01(\x0b\x32\x1c.subgen.v1.TranscribeOptions\x12<\n\x08metadata\x18\x06 \x03(\x0b\x32*.subgen.v1.TranscribeRequest.MetadataEntry\x12\x18\n\x10target_languages\x18\x07 \x03(\t\x12\x1c\n\x14transcribe_preferred\x18\x08 \x01(\x08\x12!\n\x19preferred_audio_languages\x18\t \x03(\t\x1a/\n\rMetadataEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\x42\x0e\n\x0c\x61udio_source\"\xd2\x03\n\x11TranscribeOptions\x12\x15\n\rwhisper_model\x18\x01 \x01(\t\x12\x17\n\x0fwhisper_threads\x18\x02 \x01(\x05\x12\x1c\n\x14word_level_highlight\x18\x03 \x01(\x08\x12\x16\n\x0e\x63ustom_regroup\x18\x04 \x01(\t\x12\x15\n\rlrc_for_audio\x18\x05 \x01(\x08\x12\x15\n\rcustom_prompt\x18\x06 \x01(\t\x12\x15\n\rappend_footer\x18\x07 \x01(\x08\x12\x1e\n\x16subtitle_language_name\x18\x08 \x01(\t\x12\x1e\n\x16show_model_in_filename\x18\t \x01(\x08\x12\x1f\n\x17show_subgen_in_filename\x18\n \x01(\x08\x12\x12\n\nuse_prompt\x18\x0b \x01(\x08\x12\x43\n\x0c\x65xtra_kwargs\x18\x0c \x03(\x0b\x32-.subgen.v1.TranscribeOptions.ExtraKwargsEntry\x12\x0e\n\x06\x64\x65vice\x18\r \x01(\t\x12\x14\n\x0c\x63ompute_type\x18\x0e \x01(\t\x1a\x32\n\x10\x45xtraKwargsEntry\x12\x0b\n\x03key\x18\x01 \x01(\t\x12\r\n\x05value\x18\x02 \x01(\t:\x02\x38\x01\";\n\x0fSubtitleSegment\x12\r\n\x05start\x18\x01 \x01(\x02\x12\x0b\n\x03\x65nd\x18\x02 \x01(\x02\x12\x0c\n\x04text\x18\x03 \x01(\t\"\xfc\x01\n\x12TranscribeResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rsubtitle_path\x18\x02 \x01(\t\x12\x19\n\x11\x64\x65tected_language\x18\x03 \x01(\t\x12\x15\n\rerror_message\x18\x04 \x01(\t\x12,\n\x05stats\x18\x05 \x01(\x0b\x32\x1d.subgen.v1.TranscriptionStats\x12,\n\x08segments\x18\x06 \x03(\x0b\x32\x1a.subgen.v1.SubtitleSegment\x12\x16\n\x0esubtitle_paths\x18\x07 \x03(\t\x12\x18\n\x10output_languages\x18\x08 \x03(\t\"\x98\x01\n\x12TranscriptionStats\x12\x18\n\x10\x64uration_seconds\x18\x01 \x01(\x02\x12\x15\n\rsegment_count\x18\x02 \x01(\x05\x12\x1a\n\x12model_load_time_ms\x18\x03 \x01(\x03\x12\x1d\n\x15transcription_time_ms\x18\x04 \x01(\x03\x12\x16\n\x0epeak_memory_mb\x18\x05 \x01(\x03\"\x83\x01\n\x15\x44\x65tectLanguageRequest\x12\x13\n\tfile_path\x18\x01 \x01(\tH\x00\x12\x17\n\raudio_content\x18\x02 \x01(\x0cH\x00\x12\x15\n\rsample_length\x18\x03 \x01(\x05\x12\x15\n\rsample_offset\x18\x04 \x01(\x05\x42\x0e\n\x0c\x61udio_source\"\x82\x01\n\x16\x44\x65tectLanguageResponse\x12\x0f\n\x07success\x18\x01 \x01(\x08\x12\x15\n\rlanguage_code\x18\x02 \x01(\t\x12\x15\n\rlanguage_name\x18\x03 \x01(\t\x12\x12\n\nconfidence\x18\x04 \x01(\x02\x12\x15\n\rerror_message\x18\x05 \x01(\t\"\x14\n\x12HealthCheckRequest\"\x8c\x02\n\x13HealthCheckResponse\x12\x35\n\x06status\x18\x01 \x01(\x0e\x32%.subgen.v1.HealthCheckResponse.Status\x12\x11\n\tmemory_mb\x18\x02 \x01(\x03\x12\x14\n\x0cmodel_loaded\x18\x03 \x01(\x08\x12\x16\n\x0ejobs_processed\x18\x04 \x01(\x05\x12\x13\n\x0bjobs_active\x18\x05 \x01(\x05\x12\x0f\n\x07version\x18\x06 \x01(\t\x12\x16\n\x0euptime_seconds\x18\x07 \x01(\x03\"?\n\x06Status\x12\x0b\n\x07UNKNOWN\x10\x00\x12\x0b\n\x07HEALTHY\x10\x01\x12\r\n\tUNHEALTHY\x10\x02\x12\x0c\n\x08STARTING\x10\x03\x32\x86\x02\n\x14TranscriptionService\x12I\n\nTranscribe\x12\x1c.subgen.v1.TranscribeRequest\x1a\x1d.subgen.v1.TranscribeResponse\x12U\n\x0e\x44\x65tectLanguage\x12 .subgen.v1.DetectLanguageRequest\x1a!.subgen.v1.DetectLanguageResponse\x12L\n\x0bHealthCheck\x12\x1d.subgen.v1.HealthCheckRequest\x1a\x1e.subgen.v1.HealthCheckResponseB2Z-github.com/mccloud/subgen/orchestrator/pkg/pb\x90\x01\x01\x62\x06proto3')
 
 _globals = globals()
 _builder.BuildMessageAndEnumDescriptors(DESCRIPTOR, _globals)
@@ -37,30 +37,30 @@ if not _descriptor._USE_C_DESCRIPTORS:
   _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._loaded_options = None
   _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._serialized_options = b'8\001'
   _globals['_TRANSCRIBEREQUEST']._serialized_start=35
-  _globals['_TRANSCRIBEREQUEST']._serialized_end=317
-  _globals['_TRANSCRIBEREQUEST_METADATAENTRY']._serialized_start=254
-  _globals['_TRANSCRIBEREQUEST_METADATAENTRY']._serialized_end=301
-  _globals['_TRANSCRIBEOPTIONS']._serialized_start=320
-  _globals['_TRANSCRIBEOPTIONS']._serialized_end=786
-  _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._serialized_start=736
-  _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._serialized_end=786
-  _globals['_SUBTITLESEGMENT']._serialized_start=788
-  _globals['_SUBTITLESEGMENT']._serialized_end=847
-  _globals['_TRANSCRIBERESPONSE']._serialized_start=850
-  _globals['_TRANSCRIBERESPONSE']._serialized_end=1052
-  _globals['_TRANSCRIPTIONSTATS']._serialized_start=1055
-  _globals['_TRANSCRIPTIONSTATS']._serialized_end=1207
-  _globals['_DETECTLANGUAGEREQUEST']._serialized_start=1210
-  _globals['_DETECTLANGUAGEREQUEST']._serialized_end=1341
-  _globals['_DETECTLANGUAGERESPONSE']._serialized_start=1344
-  _globals['_DETECTLANGUAGERESPONSE']._serialized_end=1474
-  _globals['_HEALTHCHECKREQUEST']._serialized_start=1476
-  _globals['_HEALTHCHECKREQUEST']._serialized_end=1496
-  _globals['_HEALTHCHECKRESPONSE']._serialized_start=1499
-  _globals['_HEALTHCHECKRESPONSE']._serialized_end=1767
-  _globals['_HEALTHCHECKRESPONSE_STATUS']._serialized_start=1704
-  _globals['_HEALTHCHECKRESPONSE_STATUS']._serialized_end=1767
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=1770
-  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=2032
+  _globals['_TRANSCRIBEREQUEST']._serialized_end=408
+  _globals['_TRANSCRIBEREQUEST_METADATAENTRY']._serialized_start=345
+  _globals['_TRANSCRIBEREQUEST_METADATAENTRY']._serialized_end=392
+  _globals['_TRANSCRIBEOPTIONS']._serialized_start=411
+  _globals['_TRANSCRIBEOPTIONS']._serialized_end=877
+  _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._serialized_start=827
+  _globals['_TRANSCRIBEOPTIONS_EXTRAKWARGSENTRY']._serialized_end=877
+  _globals['_SUBTITLESEGMENT']._serialized_start=879
+  _globals['_SUBTITLESEGMENT']._serialized_end=938
+  _globals['_TRANSCRIBERESPONSE']._serialized_start=941
+  _globals['_TRANSCRIBERESPONSE']._serialized_end=1193
+  _globals['_TRANSCRIPTIONSTATS']._serialized_start=1196
+  _globals['_TRANSCRIPTIONSTATS']._serialized_end=1348
+  _globals['_DETECTLANGUAGEREQUEST']._serialized_start=1351
+  _globals['_DETECTLANGUAGEREQUEST']._serialized_end=1482
+  _globals['_DETECTLANGUAGERESPONSE']._serialized_start=1485
+  _globals['_DETECTLANGUAGERESPONSE']._serialized_end=1615
+  _globals['_HEALTHCHECKREQUEST']._serialized_start=1617
+  _globals['_HEALTHCHECKREQUEST']._serialized_end=1637
+  _globals['_HEALTHCHECKRESPONSE']._serialized_start=1640
+  _globals['_HEALTHCHECKRESPONSE']._serialized_end=1908
+  _globals['_HEALTHCHECKRESPONSE_STATUS']._serialized_start=1845
+  _globals['_HEALTHCHECKRESPONSE_STATUS']._serialized_end=1908
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_start=1911
+  _globals['_TRANSCRIPTIONSERVICE']._serialized_end=2173
 _builder.BuildServices(DESCRIPTOR, 'transcription_pb2', _globals)
 # @@protoc_insertion_point(module_scope)

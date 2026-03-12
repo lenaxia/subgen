@@ -132,6 +132,82 @@ class TestGenerateSubtitlePath:
 
             assert path == "/very/long/path/to/video.spa.srt"
 
+    def test_generate_subtitle_path_with_target_language(self):
+        """Test generating path with target_language for translations (EPIC_10)."""
+        with patch("subtitles.writer.LanguageCode") as mock_lang_code:
+            mock_lang = Mock()
+            mock_lang.to_iso_639_2_b = Mock(return_value="jpn")  # Detected Japanese
+
+            path = generate_subtitle_path(
+                "/media/anime.mkv",
+                mock_lang,  # Detected language (Japanese)
+                "medium",
+                show_subgen=True,
+                show_model=True,
+                format="srt",
+                target_language="eng",  # Target English for translation
+            )
+
+            # Should use target_language in filename, not detected language
+            assert path == "/media/anime.subgen.medium.eng.srt"
+
+    def test_generate_subtitle_path_with_target_language_zho_tw(self):
+        """Test target_language for Chinese Traditional (EPIC_10)."""
+        with patch("subtitles.writer.LanguageCode") as mock_lang_code:
+            mock_lang = Mock()
+            mock_lang.to_iso_639_2_b = Mock(return_value="jpn")
+
+            path = generate_subtitle_path(
+                "/media/anime.mkv",
+                mock_lang,
+                "medium",
+                show_subgen=True,
+                show_model=True,
+                format="srt",
+                target_language="zho-tw",
+            )
+
+            assert path == "/media/anime.subgen.medium.zho-tw.srt"
+
+    def test_generate_subtitle_path_no_target_uses_detected(self):
+        """Test without target_language, uses detected language (transcribe mode)."""
+        with patch("subtitles.writer.LanguageCode") as mock_lang_code:
+            mock_lang = Mock()
+            mock_lang.to_iso_639_2_b = Mock(return_value="eng")
+
+            path = generate_subtitle_path(
+                "/media/movie.mkv",
+                mock_lang,
+                "small",
+                show_subgen=True,
+                show_model=True,
+                format="srt",
+                target_language=None,  # No target language
+            )
+
+            # Should use detected language
+            assert path == "/media/movie.subgen.small.eng.srt"
+
+    def test_generate_subtitle_path_target_overrides_detected(self):
+        """Test target_language overrides detected language in filename."""
+        with patch("subtitles.writer.LanguageCode") as mock_lang_code:
+            mock_lang = Mock()
+            mock_lang.to_iso_639_2_b = Mock(return_value="kor")  # Detected Korean
+
+            path = generate_subtitle_path(
+                "/media/kdrama.mkv",
+                mock_lang,
+                "medium",
+                show_subgen=True,
+                show_model=True,
+                format="srt",
+                target_language="eng",  # Translate to English
+            )
+
+            # Should NOT contain 'kor', should contain 'eng'
+            assert "kor" not in path
+            assert path == "/media/kdrama.subgen.medium.eng.srt"
+
 
 @pytest.mark.skipif(not SUBTITLE_MODULE_EXISTS, reason="Subtitle module not yet implemented")
 class TestWriteLRC:

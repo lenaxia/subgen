@@ -35,6 +35,7 @@ def generate_subtitle_path(
     show_subgen: bool = True,
     show_model: bool = True,
     format: str = "srt",
+    target_language: Optional[str] = None,
 ) -> str:
     """
     Generate subtitle file path following naming convention.
@@ -46,11 +47,13 @@ def generate_subtitle_path(
 
     Args:
         media_path: Path to source media file
-        language: Subtitle language
+        language: Subtitle language (detected source language)
         model_name: Whisper model name (tiny, small, medium, etc.)
         show_subgen: Include ".subgen" in filename
         show_model: Include model name in filename
         format: Subtitle format (srt or lrc)
+        target_language: Output language for translated subtitles (optional)
+                        When provided, this overrides the language in filename
 
     Returns:
         Path to subtitle file
@@ -65,8 +68,11 @@ def generate_subtitle_path(
     if show_model:
         parts.append(f".{model_name}")
 
-    # Language code (use ISO 639-2 B)
-    lang_code = language.to_iso_639_2_b()
+    # Language code: use target_language for translations, detected language for transcriptions
+    if target_language:
+        lang_code = target_language
+    else:
+        lang_code = language.to_iso_639_2_b()
     parts.append(f".{lang_code}")
 
     parts.append(f".{format}")

@@ -2,10 +2,11 @@
 Skip logic module for worker.
 
 Implements comprehensive skip decisions based on configuration and file inspection.
+EPIC_10: Added support for output_language-specific skip checking.
 """
 
 import os
-import glob
+import glob as glob_module
 import logging
 from typing import Optional, Tuple
 from enum import Enum
@@ -50,50 +51,32 @@ class SkipChecker:
     """Implements comprehensive skip logic for transcription."""
 
     def __init__(self, config: WorkerSettings):
-        """
-        Initialize skip checker.
-
-        Args:
-            config: Worker settings containing skip configuration
-        """
+        """Initialize skip checker."""
         self.config = config
 
-    def check(self, file_path: str) -> SkipResult:
-        """
-        Determine if file should be skipped based on configuration.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult with skip decision and reason
-        """
-        # Check 1: Target subtitle existence (SRT/LRC files)
+    def check(self, file_path: str, output_language: Optional[str] = None) -> SkipResult:
+        """Check if file should be skipped."""
         if self.config.skip.skip_if_target_subtitles_exist:
-            result = self._check_target_subtitles_exist(file_path)
+            result = self._check_target_subtitles_exist(file_path, output_language)
             if result.should_skip:
                 return result
 
-        # Check 2: Embedded subtitles (video files only)
         if self.config.skip.check_embedded_subtitles and is_video_file(file_path):
             if self.config.skip.skip_if_internal_subtitles_language:
                 result = self._check_embedded_subtitles(file_path)
                 if result.should_skip:
                     return result
 
-        # Check 3: External subtitles
         if self.config.skip.skip_if_external_subtitles_exist:
             result = self._check_external_subtitles(file_path)
             if result.should_skip:
                 return result
 
-        # Check 4: Audio language filtering (video files only)
         if self.config.skip.get_skip_audio_languages() and is_video_file(file_path):
             result = self._check_audio_language_skip(file_path)
             if result.should_skip:
                 return result
 
-        # Check 5: Preferred audio language filtering (video files only)
         if (
             self.config.skip.limit_to_preferred_audio_language
             and self.config.skip.get_preferred_audio_languages()
@@ -105,21 +88,57 @@ class SkipChecker:
 
         return SkipResult(should_skip=False, reason=None, details="No skip condition met")
 
-    def _check_target_subtitles_exist(self, file_path: str) -> SkipResult:
-        """
-        Check if target subtitle files already exist.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult if subtitles exist
-        """
+    def _check_target_subtitles_exist(
+        self, file_path: str, output_language: Optional[str] = None
+    ) -> SkipResult:
+        """Check if target subtitle files already exist (EPIC_10: supports output_language)."""
         base = os.path.splitext(file_path)[0]
 
-        # Check for subgen-generated subtitles (any language/model)
-        subgen_srt = glob.glob(f"{base}.subgen.*.*.srt")
-        subgen_lrc = glob.glob(f"{base}.subgen.*.*.lrc")
+        # EPIC_10: If output_language specified, check for that specific language only
+        if output_language:
+            output_lang_lower = output_language.lower()
+
+            # Check for subgen-generated subtitle with specific output language (case-insensitive)
+            subgen_pattern_lower = f"{base}.subgen.*.{output_lang_lower}.srt"
+            subgen_pattern_upper = f"{base}.subgen.*.{output_language.upper()}.srt"
+            subgen_matches = glob_module.glob(subgen_pattern_lower) + glob_module.glob(
+                subgen_pattern_upper
+            )
+            if subgen_matches:
+                return SkipResult(
+                    should_skip=True,
+                    reason=SkipReason.SUBTITLE_EXISTS,
+                    details=f"Subgen subtitle already exists for {output_language}: {subgen_matches[0]}",
+                )
+
+            # Check for simple subtitle with output language (case-insensitive)
+            simple_srt_lower = f"{base}.{output_lang_lower}.srt"
+            simple_srt_upper = f"{base}.{output_language.upper()}.srt"
+            if os.path.exists(simple_srt_lower) or os.path.exists(simple_srt_upper):
+                return SkipResult(
+                    should_skip=True,
+                    reason=SkipReason.SUBTITLE_EXISTS,
+                    details=f"SRT file exists for {output_language}",
+                )
+
+            simple_lrc_lower = f"{base}.{output_lang_lower}.lrc"
+            simple_lrc_upper = f"{base}.{output_language.upper()}.lrc"
+            if os.path.exists(simple_lrc_lower) or os.path.exists(simple_lrc_upper):
+                return SkipResult(
+                    should_skip=True,
+                    reason=SkipReason.LRC_EXISTS,
+                    details=f"LRC file exists for {output_language}",
+                )
+
+            return SkipResult(
+                should_skip=False,
+                reason=None,
+                details=f"No target subtitles found for {output_language}",
+            )
+
+        # Original behavior: check for any subgen subtitle
+        subgen_srt = glob_module.glob(f"{base}.subgen.*.*.srt")
+        subgen_lrc = glob_module.glob(f"{base}.subgen.*.*.lrc")
         if subgen_srt or subgen_lrc:
             existing_path = subgen_srt[0] if subgen_srt else subgen_lrc[0]
             return SkipResult(
@@ -128,7 +147,6 @@ class SkipChecker:
                 details=f"Subgen subtitle already exists: {existing_path}",
             )
 
-        # Check for audio files (LRC)
         if is_audio_file(file_path):
             lrc_path = f"{base}.lrc"
             if os.path.exists(lrc_path):
@@ -138,7 +156,6 @@ class SkipChecker:
                     details=f"LRC file exists: {lrc_path}",
                 )
 
-        # Check for video files (SRT)
         if is_video_file(file_path):
             srt_path = f"{base}.srt"
             if os.path.exists(srt_path):
@@ -151,15 +168,7 @@ class SkipChecker:
         return SkipResult(should_skip=False, reason=None, details="No target subtitles found")
 
     def _check_embedded_subtitles(self, file_path: str) -> SkipResult:
-        """
-        Check if file has embedded subtitles in target language.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult if matching embedded subtitles found
-        """
+        """Check if file has embedded subtitles in target language."""
         target_lang = self.config.skip.skip_if_internal_subtitles_language
         if not target_lang:
             return SkipResult(
@@ -180,25 +189,8 @@ class SkipChecker:
         return SkipResult(should_skip=False, reason=None, details="No matching embedded subtitles")
 
     def _check_external_subtitles(self, file_path: str) -> SkipResult:
-        """
-        Check if external subtitles exist in target language.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult if matching external subtitles found
-        """
+        """Check if external subtitles exist in target language."""
         logger.debug(f"_check_external_subtitles: checking {file_path}")
-        logger.debug(
-            f"  skip_if_external_subtitles_exist: {self.config.skip.skip_if_external_subtitles_exist}"
-        )
-        logger.debug(
-            f"  skip_if_internal_subtitles_language: {self.config.skip.skip.skip_if_internal_subtitles_language}"
-        )
-        logger.debug(
-            f"  skip_only_subgen_subtitles: {self.config.skip.skip.skip_only_subgen_subtitles}"
-        )
 
         try:
             external_subs = scan_external_subtitles(file_path)
@@ -206,11 +198,9 @@ class SkipChecker:
                 f"  Found {len(external_subs)} external subtitles: {[s.path for s in external_subs]}"
             )
 
-            # Filter for subgen-generated only if configured
             if self.config.skip.skip_only_subgen_subtitles:
                 external_subs = [s for s in external_subs if s.is_subgen_generated]
 
-            # Get target language
             target_lang = self.config.skip.skip_if_internal_subtitles_language
 
             if has_subtitle_language(external_subs, target_lang):
@@ -229,15 +219,7 @@ class SkipChecker:
         return SkipResult(should_skip=False, reason=None, details="No matching external subtitles")
 
     def _check_audio_language_skip(self, file_path: str) -> SkipResult:
-        """
-        Check if audio language is in skip list.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult if audio language matches skip list
-        """
+        """Check if audio language is in skip list."""
         skip_languages = self.config.skip.get_skip_audio_languages()
         if not skip_languages:
             return SkipResult(
@@ -259,15 +241,7 @@ class SkipChecker:
         return SkipResult(should_skip=False, reason=None, details="Audio language not in skip list")
 
     def _check_preferred_audio_language(self, file_path: str) -> SkipResult:
-        """
-        Check if audio language matches preferred list.
-
-        Args:
-            file_path: Path to media file
-
-        Returns:
-            SkipResult if audio language doesn't match preferred list
-        """
+        """Check if audio language matches preferred list."""
         preferred_languages = self.config.skip.get_preferred_audio_languages()
         if not preferred_languages:
             return SkipResult(
@@ -284,7 +258,6 @@ class SkipChecker:
                         details=f"Audio language matches preferred: {track.language}",
                     )
 
-            # No track matched preferred languages - skip
             return SkipResult(
                 should_skip=True,
                 reason=SkipReason.AUDIO_LANGUAGE_MISMATCH,
@@ -294,6 +267,3 @@ class SkipChecker:
             logger.debug(f"Error checking preferred audio language: {e}")
 
         return SkipResult(should_skip=False, reason=None, details="Error checking audio language")
-
-
-from dataclasses import dataclass

@@ -89,9 +89,18 @@ type TranscribeRequest struct {
 	// Transcription options
 	Options *TranscribeOptions `protobuf:"bytes,5,opt,name=options,proto3" json:"options,omitempty"`
 	// Metadata for post-processing (optional)
-	Metadata      map[string]string `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // e.g., plex_item_id, jellyfin_item_id
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Metadata map[string]string `protobuf:"bytes,6,rep,name=metadata,proto3" json:"metadata,omitempty" protobuf_key:"bytes,1,opt,name=key" protobuf_val:"bytes,2,opt,name=value"` // e.g., plex_item_id, jellyfin_item_id
+	// Target output languages for multi-language subtitle generation
+	// If specified, worker generates subtitles in each target language
+	// Pipe-separated in config, converted to repeated field by orchestrator
+	TargetLanguages []string `protobuf:"bytes,7,rep,name=target_languages,json=targetLanguages,proto3" json:"target_languages,omitempty"`
+	// When true and audio language matches preferred language, transcribe (same language)
+	// When false or audio doesn't match, translate to each target_language
+	TranscribePreferred bool `protobuf:"varint,8,opt,name=transcribe_preferred,json=transcribePreferred,proto3" json:"transcribe_preferred,omitempty"`
+	// Preferred audio languages (for transcribe_preferred logic)
+	PreferredAudioLanguages []string `protobuf:"bytes,9,rep,name=preferred_audio_languages,json=preferredAudioLanguages,proto3" json:"preferred_audio_languages,omitempty"`
+	unknownFields           protoimpl.UnknownFields
+	sizeCache               protoimpl.SizeCache
 }
 
 func (x *TranscribeRequest) Reset() {
@@ -173,6 +182,27 @@ func (x *TranscribeRequest) GetOptions() *TranscribeOptions {
 func (x *TranscribeRequest) GetMetadata() map[string]string {
 	if x != nil {
 		return x.Metadata
+	}
+	return nil
+}
+
+func (x *TranscribeRequest) GetTargetLanguages() []string {
+	if x != nil {
+		return x.TargetLanguages
+	}
+	return nil
+}
+
+func (x *TranscribeRequest) GetTranscribePreferred() bool {
+	if x != nil {
+		return x.TranscribePreferred
+	}
+	return false
+}
+
+func (x *TranscribeRequest) GetPreferredAudioLanguages() []string {
+	if x != nil {
+		return x.PreferredAudioLanguages
 	}
 	return nil
 }
@@ -426,6 +456,7 @@ type TranscribeResponse struct {
 	// Success flag
 	Success bool `protobuf:"varint,1,opt,name=success,proto3" json:"success,omitempty"`
 	// Subtitle file path (where it was written) - for file-based workflows
+	// DEPRECATED: Use subtitle_paths for multi-language support
 	SubtitlePath string `protobuf:"bytes,2,opt,name=subtitle_path,json=subtitlePath,proto3" json:"subtitle_path,omitempty"`
 	// Detected language (ISO 639-1 code)
 	DetectedLanguage string `protobuf:"bytes,3,opt,name=detected_language,json=detectedLanguage,proto3" json:"detected_language,omitempty"`
@@ -434,9 +465,14 @@ type TranscribeResponse struct {
 	// Transcription statistics
 	Stats *TranscriptionStats `protobuf:"bytes,5,opt,name=stats,proto3" json:"stats,omitempty"`
 	// Subtitle segments - for ASR/API responses
-	Segments      []*SubtitleSegment `protobuf:"bytes,6,rep,name=segments,proto3" json:"segments,omitempty"`
-	unknownFields protoimpl.UnknownFields
-	sizeCache     protoimpl.SizeCache
+	Segments []*SubtitleSegment `protobuf:"bytes,6,rep,name=segments,proto3" json:"segments,omitempty"`
+	// Multi-language subtitle paths (one per target language)
+	// For single-language, this contains one entry
+	SubtitlePaths []string `protobuf:"bytes,7,rep,name=subtitle_paths,json=subtitlePaths,proto3" json:"subtitle_paths,omitempty"`
+	// Output languages generated (matches subtitle_paths order)
+	OutputLanguages []string `protobuf:"bytes,8,rep,name=output_languages,json=outputLanguages,proto3" json:"output_languages,omitempty"`
+	unknownFields   protoimpl.UnknownFields
+	sizeCache       protoimpl.SizeCache
 }
 
 func (x *TranscribeResponse) Reset() {
@@ -507,6 +543,20 @@ func (x *TranscribeResponse) GetStats() *TranscriptionStats {
 func (x *TranscribeResponse) GetSegments() []*SubtitleSegment {
 	if x != nil {
 		return x.Segments
+	}
+	return nil
+}
+
+func (x *TranscribeResponse) GetSubtitlePaths() []string {
+	if x != nil {
+		return x.SubtitlePaths
+	}
+	return nil
+}
+
+func (x *TranscribeResponse) GetOutputLanguages() []string {
+	if x != nil {
+		return x.OutputLanguages
 	}
 	return nil
 }
@@ -914,14 +964,17 @@ var File_transcription_proto protoreflect.FileDescriptor
 
 const file_transcription_proto_rawDesc = "" +
 	"\n" +
-	"\x13transcription.proto\x12\tsubgen.v1\"\xea\x02\n" +
+	"\x13transcription.proto\x12\tsubgen.v1\"\x84\x04\n" +
 	"\x11TranscribeRequest\x12\x1d\n" +
 	"\tfile_path\x18\x01 \x01(\tH\x00R\bfilePath\x12%\n" +
 	"\raudio_content\x18\x02 \x01(\fH\x00R\faudioContent\x12\x1b\n" +
 	"\ttask_type\x18\x03 \x01(\tR\btaskType\x12%\n" +
 	"\x0eforce_language\x18\x04 \x01(\tR\rforceLanguage\x126\n" +
 	"\aoptions\x18\x05 \x01(\v2\x1c.subgen.v1.TranscribeOptionsR\aoptions\x12F\n" +
-	"\bmetadata\x18\x06 \x03(\v2*.subgen.v1.TranscribeRequest.MetadataEntryR\bmetadata\x1a;\n" +
+	"\bmetadata\x18\x06 \x03(\v2*.subgen.v1.TranscribeRequest.MetadataEntryR\bmetadata\x12)\n" +
+	"\x10target_languages\x18\a \x03(\tR\x0ftargetLanguages\x121\n" +
+	"\x14transcribe_preferred\x18\b \x01(\bR\x13transcribePreferred\x12:\n" +
+	"\x19preferred_audio_languages\x18\t \x03(\tR\x17preferredAudioLanguages\x1a;\n" +
 	"\rMetadataEntry\x12\x10\n" +
 	"\x03key\x18\x01 \x01(\tR\x03key\x12\x14\n" +
 	"\x05value\x18\x02 \x01(\tR\x05value:\x028\x01B\x0e\n" +
@@ -949,14 +1002,16 @@ const file_transcription_proto_rawDesc = "" +
 	"\x0fSubtitleSegment\x12\x14\n" +
 	"\x05start\x18\x01 \x01(\x02R\x05start\x12\x10\n" +
 	"\x03end\x18\x02 \x01(\x02R\x03end\x12\x12\n" +
-	"\x04text\x18\x03 \x01(\tR\x04text\"\x92\x02\n" +
+	"\x04text\x18\x03 \x01(\tR\x04text\"\xe4\x02\n" +
 	"\x12TranscribeResponse\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\x12#\n" +
 	"\rsubtitle_path\x18\x02 \x01(\tR\fsubtitlePath\x12+\n" +
 	"\x11detected_language\x18\x03 \x01(\tR\x10detectedLanguage\x12#\n" +
 	"\rerror_message\x18\x04 \x01(\tR\ferrorMessage\x123\n" +
 	"\x05stats\x18\x05 \x01(\v2\x1d.subgen.v1.TranscriptionStatsR\x05stats\x126\n" +
-	"\bsegments\x18\x06 \x03(\v2\x1a.subgen.v1.SubtitleSegmentR\bsegments\"\xeb\x01\n" +
+	"\bsegments\x18\x06 \x03(\v2\x1a.subgen.v1.SubtitleSegmentR\bsegments\x12%\n" +
+	"\x0esubtitle_paths\x18\a \x03(\tR\rsubtitlePaths\x12)\n" +
+	"\x10output_languages\x18\b \x03(\tR\x0foutputLanguages\"\xeb\x01\n" +
 	"\x12TranscriptionStats\x12)\n" +
 	"\x10duration_seconds\x18\x01 \x01(\x02R\x0fdurationSeconds\x12#\n" +
 	"\rsegment_count\x18\x02 \x01(\x05R\fsegmentCount\x12+\n" +

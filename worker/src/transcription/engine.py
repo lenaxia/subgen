@@ -49,6 +49,7 @@ class TranscribeOptions:
     subtitle_language_name: str = "aa"
     show_model_in_filename: bool = True
     show_subgen_in_filename: bool = True
+    target_language: Optional[str] = None  # Output language for translated subtitles
 
 
 @dataclass
@@ -245,6 +246,7 @@ class TranscriptionEngine:
                     show_subgen=options.show_subgen_in_filename,
                     show_model=options.show_model_in_filename,
                     format="srt",
+                    target_language=options.target_language,
                 )
                 segment_count = write_srt(
                     segments_iter,

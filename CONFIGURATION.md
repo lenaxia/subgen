@@ -11,7 +11,7 @@
 | **Whisper Models** | `WHISPER_MODEL`, `TRANSCRIBE_DEVICE`, `COMPUTE_TYPE` | Transcription engine settings |
 | **Performance** | `CONCURRENT_TRANSCRIPTIONS`, `WHISPER_THREADS`, `MAX_WORKERS` | Resource allocation |
 | **Skip Logic** | `SKIP_IF_*`, `SKIP_*_LANGUAGES` | Control when to skip processing |
-| **Language** | `FORCE_LANGUAGE`, `PREFERRED_AUDIO_LANGUAGES` | Language detection and selection |
+| **Language** | `FORCE_LANGUAGE`, `PREFERRED_AUDIO_LANGUAGES`, `TARGET_LANGUAGES` | Language detection and multi-language output |
 | **Subtitle Format** | `WORD_LEVEL_HIGHLIGHT`, `LRC_FOR_AUDIO_FILES`, `APPEND_FOOTER` | Subtitle output formatting |
 | **File Monitoring** | `MONITOR`, `TRANSCRIBE_FOLDERS`, `SCANNER_INITIALIZED` | File system watching |
 | **Path Mapping** | `USE_PATH_MAPPING`, `PATH_MAPPING_FROM`, `PATH_MAPPING_TO` | Path translation for containers |
@@ -94,7 +94,9 @@
 |----------|---------|-------------|---------|
 | `PROCESS_ADDED_MEDIA` | `true` | Process media when added to library | `true` |
 | `PROCESS_MEDIA_ON_PLAY` | `true` | Process media when played | `false` |
-| `TRANSCRIBE_OR_TRANSLATE` | `transcribe` | Task type: `transcribe` or `translate` | `transcribe` |
+| `TRANSCRIBE_OR_TRANSLATE` | `transcribe` | **DEPRECATED**: Use `TARGET_LANGUAGES` instead | `transcribe` |
+
+> **Note**: `TRANSCRIBE_OR_TRANSLATE` is deprecated as of EPIC_10. Use `TARGET_LANGUAGES` for multi-language subtitle generation. If `TARGET_LANGUAGES` is empty, the system falls back to single-language mode (transcribe detected language).
 
 ---
 
@@ -253,6 +255,71 @@ Track 2: aac eng [Commentary] ← Director commentary
 - `ISO_639_2_B`: 3-letter bibliographic codes (`eng`, `jpn`, `fre`)
 - `NAME`: Full names (`English`, `Japanese`, `French`)
 - `NATIVE`: Native names (`English`, `日本語`, `Français`)
+
+### Multi-Language Subtitle Generation (EPIC_10)
+
+Generate subtitles in multiple languages from a single media file. This is useful for:
+- Families with members who speak different languages
+- International content that needs multiple subtitle options
+- Anime with Japanese audio + English/Chinese subtitles
+
+| Variable | Default | Description | Example |
+|----------|---------|-------------|---------|
+| `TARGET_LANGUAGES` | `""` | Target output languages (comma or pipe-separated) | `eng,zho-tw` or `eng|zho-tw` |
+| `TRANSCRIBE_PREFERRED` | `true` | Transcribe when audio matches preferred language | `true` |
+
+**How It Works**:
+1. Detect audio language from the media file
+2. If audio language matches `PREFERRED_AUDIO_LANGUAGES` and `TRANSCRIBE_PREFERRED=true`:
+   - Generate subtitle in the same language (transcribe)
+3. For each language in `TARGET_LANGUAGES`:
+   - If different from audio language: generate subtitle via translation
+   - If same as audio language: skip (already handled by transcribe)
+
+**Configuration Examples**:
+
+**Example 1: Anime Library (Japanese + English + Chinese)**
+```yaml
+PREFERRED_AUDIO_LANGUAGES: "jpn,eng"
+TARGET_LANGUAGES: "eng,zho-tw"
+TRANSCRIBE_PREFERRED: "true"
+```
+
+For **Japanese audio**:
+- Transcribe Japanese → `movie.jpn.subgen.medium.srt`
+- Translate to English → `movie.eng.subgen.medium.srt`
+- Translate to Chinese → `movie.zho-tw.subgen.medium.srt`
+
+For **English audio**:
+- Transcribe English → `movie.eng.subgen.medium.srt` (skip translate to same)
+
+**Example 2: Foreign Films (All to English)**
+```yaml
+PREFERRED_AUDIO_LANGUAGES: "eng"
+TARGET_LANGUAGES: "eng"
+TRANSCRIBE_PREFERRED: "true"
+```
+
+For **Japanese audio**:
+- Translate to English → `movie.eng.subgen.medium.srt`
+
+For **English audio**:
+- Transcribe English → `movie.eng.subgen.medium.srt`
+
+**Example 3: Backward Compatible (No Multi-Language)**
+```yaml
+TARGET_LANGUAGES: ""  # Empty = single language mode
+```
+
+For any audio:
+- Transcribe to detected language → `movie.{lang}.subgen.medium.srt`
+
+**Skip Logic for Multi-Language**:
+When `TARGET_LANGUAGES` is set, skip logic checks for subtitles in the **specific output language**, not just any subtitle. This allows generating multiple language subtitles independently.
+
+> **Tip**: Both comma (`,`) and pipe (`|`) separators are supported. Comma is recommended for better YAML compatibility.
+
+**Deprecation Notice**: `TRANSCRIBE_OR_TRANSLATE` is deprecated. Use `TARGET_LANGUAGES` instead.
 
 ---
 

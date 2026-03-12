@@ -103,6 +103,92 @@ class TestSkipCheckerTargetSubtitles:
         assert result.reason is None
 
 
+class TestSkipCheckerOutputLanguage:
+    """Test skip logic with specific output language (EPIC_10)."""
+
+    def test_skip_if_specific_language_subgen_exists(self, temp_dir, skip_checker):
+        """Should skip if subgen subtitle exists for specific output language."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.subgen.medium.eng.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path, output_language="eng")
+        assert result.should_skip is True
+        assert result.reason == SkipReason.SUBTITLE_EXISTS
+        assert "eng" in result.details.lower()
+
+    def test_no_skip_if_different_language_exists(self, temp_dir, skip_checker):
+        """Should NOT skip if subtitle exists for DIFFERENT language."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.subgen.medium.eng.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path, output_language="jpn")
+        assert result.should_skip is False
+        assert result.details is not None  # Should have some details
+
+    def test_skip_if_simple_subtitle_for_language_exists(self, temp_dir, skip_checker):
+        """Should skip if simple subtitle exists for specific language."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.zho-tw.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path, output_language="zho-tw")
+        assert result.should_skip is True
+        assert result.reason == SkipReason.SUBTITLE_EXISTS
+
+    def test_skip_if_lrc_for_language_exists(self, temp_dir, skip_checker):
+        """Should skip if LRC exists for specific language."""
+        audio_path = os.path.join(temp_dir, "test.mp3")
+        Path(audio_path).touch()
+
+        lrc_path = os.path.join(temp_dir, "test.eng.lrc")
+        Path(lrc_path).touch()
+
+        result = skip_checker.check(audio_path, output_language="eng")
+        assert result.should_skip is True
+        assert result.reason == SkipReason.LRC_EXISTS
+
+    def test_no_skip_if_any_subtitle_but_checking_specific(self, temp_dir, skip_checker):
+        """Should not skip if checking specific language but different language exists."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.subgen.medium.jpn.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path, output_language="eng")
+        assert result.should_skip is False
+
+    def test_case_insensitive_language_match(self, temp_dir, skip_checker):
+        """Language matching should be case insensitive."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.subgen.medium.ENG.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path, output_language="eng")
+        assert result.should_skip is True
+
+    def test_no_output_language_uses_original_behavior(self, temp_dir, skip_checker):
+        """Without output_language, should use original any-subtitle behavior."""
+        video_path = os.path.join(temp_dir, "test.mkv")
+        Path(video_path).touch()
+
+        subtitle_path = os.path.join(temp_dir, "test.subgen.medium.eng.srt")
+        Path(subtitle_path).touch()
+
+        result = skip_checker.check(video_path)
+        assert result.should_skip is True
+
+
 class TestSkipCheckerFileTypes:
     """Test skip logic for different file types."""
 

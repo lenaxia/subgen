@@ -42,6 +42,18 @@ message TranscribeRequest {
   
   // Metadata for post-processing (optional)
   map<string, string> metadata = 6;  // e.g., plex_item_id, jellyfin_item_id
+  
+  // Target output languages for multi-language subtitle generation
+  // If specified, worker generates subtitles in each target language
+  // Pipe-separated in config, converted to repeated field by orchestrator
+  repeated string target_languages = 7;
+  
+  // When true and audio language matches preferred language, transcribe (same language)
+  // When false or audio doesn't match, translate to each target_language
+  bool transcribe_preferred = 8;
+  
+  // Preferred audio languages (for transcribe_preferred logic)
+  repeated string preferred_audio_languages = 9;
 }
 
 message TranscribeOptions {
@@ -107,6 +119,7 @@ message TranscribeResponse {
   bool success = 1;
   
   // Subtitle file path (where it was written) - for file-based workflows
+  // DEPRECATED: Use subtitle_paths for multi-language support
   string subtitle_path = 2;
   
   // Detected language (ISO 639-1 code)
@@ -120,6 +133,13 @@ message TranscribeResponse {
   
   // Subtitle segments - for ASR/API responses
   repeated SubtitleSegment segments = 6;
+  
+  // Multi-language subtitle paths (one per target language)
+  // For single-language, this contains one entry
+  repeated string subtitle_paths = 7;
+  
+  // Output languages generated (matches subtitle_paths order)
+  repeated string output_languages = 8;
 }
 
 message TranscriptionStats {

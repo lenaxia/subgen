@@ -97,8 +97,11 @@ func (c *Client) transcribeWithClient(ctx context.Context, client pb.Transcripti
 
 	// Build request from task
 	req := &pb.TranscribeRequest{
-		TaskType:      task.TaskType,
-		ForceLanguage: task.ForceLanguage,
+		TaskType:                task.TaskType,
+		ForceLanguage:           task.ForceLanguage,
+		TargetLanguages:         task.TargetLanguages,
+		TranscribePreferred:     task.TranscribePreferred,
+		PreferredAudioLanguages: task.PreferredAudioLanguages,
 		Options: &pb.TranscribeOptions{
 			WhisperModel:   c.getWhisperModel(task),
 			WhisperThreads: c.getWhisperThreads(task),

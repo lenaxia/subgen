@@ -104,6 +104,8 @@ type SkipConfig struct {
 	OnlySubgenSubtitles           bool
 	PreferredAudioLanguages       []string
 	LimitToPreferredAudioLanguage bool
+	TargetLanguages               []string
+	TranscribePreferred           bool
 }
 
 type PathMappingConfig struct {
@@ -202,8 +204,10 @@ func Load() (*Config, error) {
 			SubtitleLanguages:             parseStringList(v.GetString("SKIP_SUBTITLE_LANGUAGES")),
 			AudioLanguages:                parseStringList(v.GetString("SKIP_IF_AUDIO_LANGUAGES")),
 			OnlySubgenSubtitles:           v.GetBool("SKIP_ONLY_SUBGEN_SUBTITLES"),
-			PreferredAudioLanguages:       parseStringList(v.GetString("PREFERRED_AUDIO_LANGUAGES")),
+			PreferredAudioLanguages:       parseStringListFlexible(v.GetString("PREFERRED_AUDIO_LANGUAGES")),
 			LimitToPreferredAudioLanguage: v.GetBool("LIMIT_TO_PREFERRED_AUDIO_LANGUAGE"),
+			TargetLanguages:               parseStringListFlexible(v.GetString("TARGET_LANGUAGES")),
+			TranscribePreferred:           v.GetBool("TRANSCRIBE_PREFERRED"),
 		},
 
 		PathMapping: PathMappingConfig{
@@ -297,6 +301,8 @@ func setDefaults(v *viper.Viper) {
 	v.SetDefault("SKIP_SUBTITLE_LANGUAGES", "")
 	v.SetDefault("SKIP_IF_AUDIO_LANGUAGES", "")
 	v.SetDefault("SKIP_ONLY_SUBGEN_SUBTITLES", false)
+	v.SetDefault("TARGET_LANGUAGES", "")
+	v.SetDefault("TRANSCRIBE_PREFERRED", true)
 
 	// Path Mapping
 	v.SetDefault("USE_PATH_MAPPING", false)
@@ -460,6 +466,18 @@ func parseStringListPipe(s string) []string {
 		}
 	}
 	return result
+}
+
+// parseStringListFlexible parses a comma or pipe-separated string into a slice
+// If pipe is present, uses pipe separator; otherwise uses comma
+func parseStringListFlexible(s string) []string {
+	if s == "" {
+		return []string{}
+	}
+	if strings.Contains(s, "|") {
+		return parseStringListPipe(s)
+	}
+	return parseStringList(s)
 }
 
 // contains checks if a string slice contains a value
