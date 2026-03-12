@@ -21,7 +21,6 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/monitor"
 	"github.com/mccloud/subgen/orchestrator/internal/observability"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
-	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/mccloud/subgen/orchestrator/internal/webhooks"
 	"github.com/prometheus/client_golang/prometheus/promhttp"
 	"github.com/sirupsen/logrus"
@@ -273,7 +272,7 @@ func main() {
 				if timeout == 0 {
 					timeout = 1 * time.Hour // Default 1 hour
 				}
-				cleaned := taskQueue.CleanupStaleTasks(timeout)
+				cleaned := taskQueue.CleanupStaleTasks(timeout, workerPool.IsWorkerHealthy)
 				if cleaned > 0 {
 					log.WithField("count", cleaned).Warn("Cleaned up stale tasks")
 				}
@@ -300,41 +299,11 @@ func main() {
 		// Create skip checker FIRST (before file watcher callback needs it)
 		queueAdapter := &QueueAdapter{queue: taskQueue}
 
-		// Convert config.SkipConfig to skip.Config
-		skipConfig := &skip.Config{
-			SkipIfTargetSubtitleExists:      cfg.Skip.IfTargetSubtitlesExist,
-			CheckEmbeddedSubtitles:          true, // Default to true
-			SkipIfInternalSubtitlesLanguage: cfg.Skip.IfInternalSubtitlesLang,
-			SkipIfExternalSubtitlesExist:    cfg.Skip.IfExternalSubtitlesExist,
-			SkipOnlySubgenSubtitles:         cfg.Skip.OnlySubgenSubtitles,
-			SkipSubtitleLanguages:           cfg.Skip.SubtitleLanguages,
-			SkipIfAudioLanguages:            cfg.Skip.AudioLanguages,
-			PreferredAudioLanguages:         cfg.Skip.PreferredAudioLanguages,
-			LimitToPreferredAudioLanguage:   cfg.Skip.LimitToPreferredAudioLanguage,
-		}
-
-		skipChecker, err := skip.NewBasicChecker(skipConfig)
-		if err != nil {
-			log.WithError(err).Fatal("Failed to create skip checker")
-		}
-		scanner := monitor.NewScannerWithLogger(queueAdapter, skipChecker, log, cfg)
+		scanner := monitor.NewScannerWithLogger(queueAdapter, log, cfg)
 		webhookServer.SetScanner(scanner)
 
-		// Create callback for file watcher (NOW has access to skipChecker)
+		// Create callback for file watcher
 		fileCallback := func(filePath string) {
-			// Check skip logic first
-			result, checkErr := skipChecker.Check(ctx, filePath)
-			if checkErr != nil {
-				log.WithError(checkErr).Warnf("Skip check failed for %s, will process anyway", filePath)
-			} else if result != nil && result.ShouldSkip {
-				log.WithFields(logrus.Fields{
-					"file":    filePath,
-					"reason":  result.Reason,
-					"details": result.Details,
-				}).Info("Skipping monitored file (skip logic)")
-				return
-			}
-
 			// Create transcription task
 			task := queue.NewTask(filePath, queue.TaskTypeTranscribe)
 
@@ -603,6 +572,9 @@ func (td *TaskDispatcher) dispatchTask(ctx context.Context, task *queue.Task) {
 		})
 		return
 	}
+
+	// Record which worker is processing this task (for stale detection)
+	task.WorkerAddress = worker.Address
 
 	// Decrement the Active count when this goroutine exits (success or error).
 	workerID := worker.ID

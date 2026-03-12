@@ -344,3 +344,16 @@ func updateWorker(workers []Worker, updated Worker) []Worker {
 	}
 	return append(workers, updated)
 }
+
+// IsWorkerHealthy checks if a worker with the given address is healthy
+func (p *Pool) IsWorkerHealthy(address string) bool {
+	p.mu.RLock()
+	defer p.mu.RUnlock()
+
+	for _, w := range p.workers {
+		if w.Address == address {
+			return w.Healthy
+		}
+	}
+	return false
+}

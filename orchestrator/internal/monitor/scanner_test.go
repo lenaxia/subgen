@@ -1,14 +1,12 @@
 package monitor
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"testing"
 
 	"github.com/mccloud/subgen/orchestrator/internal/config"
-	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/sirupsen/logrus"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -26,24 +24,6 @@ func (mq *MockQueue) Enqueue(task interface{}) error {
 
 func (mq *MockQueue) Count() int {
 	return len(mq.enqueuedTasks)
-}
-
-// MockSkipChecker implements skip.Checker for testing
-type MockSkipChecker struct {
-	shouldSkip bool
-	skipReason skip.SkipReason
-}
-
-func (msc *MockSkipChecker) Check(ctx context.Context, filePath string) (*skip.CheckResult, error) {
-	return &skip.CheckResult{
-		ShouldSkip: msc.shouldSkip,
-		Reason:     msc.skipReason,
-		Details:    "mock skip check",
-	}, nil
-}
-
-func (msc *MockSkipChecker) GetConfig() *skip.Config {
-	return nil
 }
 
 // Helper function to create test directory structure
@@ -69,10 +49,9 @@ func createTestConfig() *config.Config {
 
 func TestNewScanner(t *testing.T) {
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{}
 	cfg := createTestConfig()
 
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 	assert.NotNil(t, scanner, "Scanner should not be nil")
 }
 
@@ -87,9 +66,8 @@ func TestScanner_ScanDirectory_SingleFile(t *testing.T) {
 	require.NoError(t, err)
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute
 	result, err := scanner.ScanDirectory(testDir, false, "")
@@ -115,9 +93,8 @@ func TestScanner_ScanDirectory_MultipleFiles(t *testing.T) {
 	}
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute
 	result, err := scanner.ScanDirectory(testDir, false, "")
@@ -154,9 +131,8 @@ func TestScanner_ScanDirectory_Recursive(t *testing.T) {
 	require.NoError(t, err)
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute
 	result, err := scanner.ScanDirectory(testDir, false, "")
@@ -192,9 +168,8 @@ func TestScanner_ScanDirectory_FilterNonMediaFiles(t *testing.T) {
 	}
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute
 	result, err := scanner.ScanDirectory(testDir, false, "")
@@ -205,42 +180,10 @@ func TestScanner_ScanDirectory_FilterNonMediaFiles(t *testing.T) {
 	assert.Equal(t, 3, result.Queued, "Should queue 3 media files")
 }
 
-func TestScanner_ScanDirectory_SkipLogicIntegration(t *testing.T) {
-	// Setup
-	testDir := setupTestDir(t)
-	defer cleanupTestDir(t, testDir)
-
-	// Create media files
-	for i := 1; i <= 5; i++ {
-		filename := filepath.Join(testDir, filepath.Base(testDir)+".mkv")
-		err := os.WriteFile(filename, []byte("test"), 0644)
-		require.NoError(t, err)
-	}
-
-	queue := &MockQueue{}
-	// Skip checker that skips all files
-	skipChecker := &MockSkipChecker{
-		shouldSkip: true,
-		skipReason: skip.ReasonSubtitleExists,
-	}
-	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
-
-	// Execute
-	result, err := scanner.ScanDirectory(testDir, false, "")
-
-	// Verify
-	require.NoError(t, err)
-	assert.Greater(t, result.Scanned, 0, "Should scan files")
-	assert.Equal(t, 0, result.Queued, "Should queue 0 files (all skipped)")
-	assert.Equal(t, result.Scanned, result.Skipped, "All scanned files should be skipped")
-}
-
 func TestScanner_ScanDirectory_DirectoryNotFound(t *testing.T) {
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute with non-existent directory
 	result, err := scanner.ScanDirectory("/nonexistent/directory", false, "")
@@ -256,9 +199,8 @@ func TestScanner_ScanDirectory_EmptyDirectory(t *testing.T) {
 	defer cleanupTestDir(t, testDir)
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute
 	result, err := scanner.ScanDirectory(testDir, false, "")
@@ -267,35 +209,6 @@ func TestScanner_ScanDirectory_EmptyDirectory(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, 0, result.Scanned, "Should scan 0 files in empty directory")
 	assert.Equal(t, 0, result.Queued, "Should queue 0 files")
-}
-
-func TestScanner_ScanDirectory_SkipReasonTracking(t *testing.T) {
-	// Setup
-	testDir := setupTestDir(t)
-	defer cleanupTestDir(t, testDir)
-
-	// Create multiple media files
-	for i := 1; i <= 3; i++ {
-		filename := filepath.Join(testDir, filepath.Base(testDir)+".mkv")
-		err := os.WriteFile(filename, []byte("test"), 0644)
-		require.NoError(t, err)
-	}
-
-	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{
-		shouldSkip: true,
-		skipReason: skip.ReasonSubtitleExists,
-	}
-	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
-
-	// Execute
-	result, err := scanner.ScanDirectory(testDir, false, "")
-
-	// Verify
-	require.NoError(t, err)
-	assert.NotNil(t, result.SkipReasons, "SkipReasons map should not be nil")
-	assert.Greater(t, result.SkipReasons[string(skip.ReasonSubtitleExists)], 0, "Should track subtitle_exists reason")
 }
 
 func TestScanner_ScanDirectory_LanguageParameter(t *testing.T) {
@@ -308,9 +221,8 @@ func TestScanner_ScanDirectory_LanguageParameter(t *testing.T) {
 	require.NoError(t, err)
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 	cfg := createTestConfig()
-	scanner := NewScanner(queue, skipChecker, cfg)
+	scanner := NewScanner(queue, cfg)
 
 	// Execute with language parameter
 	result, err := scanner.ScanDirectory(testDir, false, "en")
@@ -337,13 +249,12 @@ func TestScanner_ScanDirectory_LargeDirectory(t *testing.T) {
 	}
 
 	queue := &MockQueue{}
-	skipChecker := &MockSkipChecker{shouldSkip: false}
 
 	// Create scanner with logger
 	log := logrus.New()
 	log.SetLevel(logrus.InfoLevel)
 	cfg := createTestConfig()
-	scanner := NewScannerWithLogger(queue, skipChecker, log, cfg)
+	scanner := NewScannerWithLogger(queue, log, cfg)
 
 	// Execute with timing
 	result, err := scanner.ScanDirectory(testDir, false, "")

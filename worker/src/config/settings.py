@@ -362,6 +362,10 @@ class SkipConfig(BaseSettings):
         str_strip_whitespace=True,
     )
 
+    check_embedded_subtitles: bool = Field(
+        default=True,
+        description="Check for embedded subtitles",
+    )
     skip_if_external_subtitles_exist: bool = Field(
         default=False,
         validation_alias="SKIPIFEXTERNALSUB",
@@ -370,6 +374,13 @@ class SkipConfig(BaseSettings):
     skip_if_target_subtitles_exist: bool = Field(
         default=True,
         description="Skip if target language subtitles exist",
+    )
+    skip_if_internal_subtitles_language: str = Field(
+        default="",
+        validation_alias=AliasChoices(
+            "SKIP_IF_INTERNAL_SUBTITLES_LANGUAGE", "SKIP_INTERNAL_SUBTITLE_LANG"
+        ),
+        description="Skip if embedded subtitles match this language",
     )
     skip_subtitle_languages: str = Field(
         default="",
@@ -380,6 +391,16 @@ class SkipConfig(BaseSettings):
         default="",
         validation_alias=AliasChoices("SKIP_AUDIO_LANGUAGES", "SKIP_IF_AUDIO_LANGUAGES"),
         description="Audio languages to skip (pipe or comma-separated)",
+    )
+    preferred_audio_languages: str = Field(
+        default="",
+        validation_alias=AliasChoices("PREFERRED_AUDIO_LANGUAGES", "AUDIO_LANGUAGES"),
+        description="Preferred audio languages (pipe or comma-separated)",
+    )
+    limit_to_preferred_audio_language: bool = Field(
+        default=False,
+        validation_alias="LIMIT_TO_PREFERRED_AUDIO_LANGUAGE",
+        description="Limit transcription to preferred audio languages only",
     )
     skip_only_subgen_subtitles: bool = Field(
         default=False,
@@ -397,6 +418,10 @@ class SkipConfig(BaseSettings):
     def get_skip_audio_languages(self) -> List[str]:
         """Get skip_audio_languages as a list."""
         return self._parse_language_string(self.skip_audio_languages)
+
+    def get_preferred_audio_languages(self) -> List[str]:
+        """Get preferred_audio_languages as a list."""
+        return self._parse_language_string(self.preferred_audio_languages)
 
     @staticmethod
     def _parse_language_string(v: str) -> List[str]:

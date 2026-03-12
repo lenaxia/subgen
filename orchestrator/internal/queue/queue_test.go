@@ -2,6 +2,7 @@ package queue
 
 import (
 	"errors"
+	"fmt"
 	"sync"
 	"testing"
 	"time"
@@ -380,18 +381,52 @@ func TestCleanupStaleTasks(t *testing.T) {
 	// Verify all in processing
 	assert.Equal(t, 3, q.ProcessingCount())
 
-	// Manually set StartedAt to simulate old tasks
+	// Manually set StartedAt and WorkerAddress to simulate old tasks
 	q.mu.Lock()
 	q.processing[t1.ID].StartedAt = time.Now().Add(-2 * time.Hour)    // Stale (> 1 hour)
+	q.processing[t1.ID].WorkerAddress = "worker1:50051"               // Unhealthy worker
 	q.processing[t2.ID].StartedAt = time.Now().Add(-90 * time.Minute) // Stale (> 1 hour)
+	q.processing[t2.ID].WorkerAddress = "worker2:50051"               // Unhealthy worker
 	q.processing[t3.ID].StartedAt = time.Now().Add(-5 * time.Minute)  // Fresh (< 1 hour)
+	q.processing[t3.ID].WorkerAddress = "worker3:50051"               // Doesn't matter - not stale
 	q.mu.Unlock()
 
-	// Cleanup with 1 hour timeout (should remove task1 and task2)
-	cleaned := q.CleanupStaleTasks(1 * time.Hour)
+	// Health checker: worker1 and worker2 are unhealthy, worker3 is healthy
+	healthyChecker := func(addr string) bool {
+		return addr == "worker3:50051"
+	}
+
+	// Cleanup with 1 hour timeout (should remove task1 and task2 - stale AND worker unhealthy)
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
 
 	assert.Equal(t, 2, cleaned)
 	assert.Equal(t, 1, q.ProcessingCount()) // Only task3 remains
+}
+
+// TestCleanupStaleTasks_HealthyWorker tests that tasks with healthy workers are not cleaned
+func TestCleanupStaleTasks_HealthyWorker(t *testing.T) {
+	q := newTestQueue(100)
+
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+	_ = q.Enqueue(task)
+	_, _ = q.Dequeue()
+
+	// Set task as old but with healthy worker
+	q.mu.Lock()
+	q.processing[task.ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[task.ID].WorkerAddress = "healthy-worker:50051"
+	q.mu.Unlock()
+
+	// Health checker: worker is healthy
+	healthyChecker := func(addr string) bool {
+		return addr == "healthy-worker:50051"
+	}
+
+	// Should NOT clean up because worker is healthy
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
+
+	assert.Equal(t, 0, cleaned)
+	assert.Equal(t, 1, q.ProcessingCount())
 }
 
 // TestCleanupStaleTasks_NoStale tests cleanup when no tasks are stale
@@ -402,8 +437,11 @@ func TestCleanupStaleTasks_NoStale(t *testing.T) {
 	_ = q.Enqueue(task)
 	_, _ = q.Dequeue()
 
-	// Task just started, should not be cleaned
-	cleaned := q.CleanupStaleTasks(1 * time.Hour)
+	// Health checker always returns false (unhealthy)
+	healthyChecker := func(addr string) bool { return false }
+
+	// Task just started, should not be cleaned even with unhealthy worker
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
 
 	assert.Equal(t, 0, cleaned)
 	assert.Equal(t, 1, q.ProcessingCount())
@@ -413,10 +451,136 @@ func TestCleanupStaleTasks_NoStale(t *testing.T) {
 func TestCleanupStaleTasks_EmptyQueue(t *testing.T) {
 	q := newTestQueue(100)
 
-	cleaned := q.CleanupStaleTasks(1 * time.Hour)
+	healthyChecker := func(addr string) bool { return false }
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
 
 	assert.Equal(t, 0, cleaned)
 	assert.Equal(t, 0, q.ProcessingCount())
+}
+
+// TestCleanupStaleTasks_NoWorkerAssigned tests that tasks without worker assignment are cleaned
+func TestCleanupStaleTasks_NoWorkerAssigned(t *testing.T) {
+	q := newTestQueue(100)
+
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+	_ = q.Enqueue(task)
+	_, _ = q.Dequeue()
+
+	// Set task as old with NO worker assigned (empty string)
+	q.mu.Lock()
+	q.processing[task.ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	// WorkerAddress is "" by default - not set
+	q.mu.Unlock()
+
+	healthyChecker := func(addr string) bool { return true } // All workers healthy
+
+	// Should be cleaned because no worker was assigned (treated as unhealthy)
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
+
+	assert.Equal(t, 1, cleaned)
+	assert.Equal(t, 0, q.ProcessingCount())
+}
+
+// TestCleanupStaleTasks_WorkerNotFound tests that tasks with unknown workers are cleaned
+func TestCleanupStaleTasks_WorkerNotFound(t *testing.T) {
+	q := newTestQueue(100)
+
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+	_ = q.Enqueue(task)
+	_, _ = q.Dequeue()
+
+	// Set task as old with a worker that doesn't exist
+	q.mu.Lock()
+	q.processing[task.ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[task.ID].WorkerAddress = "unknown-worker:50051"
+	q.mu.Unlock()
+
+	// Health checker returns false for unknown worker
+	healthyChecker := func(addr string) bool {
+		return addr == "known-worker:50051"
+	}
+
+	// Should be cleaned because worker is not in healthy list
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
+
+	assert.Equal(t, 1, cleaned)
+	assert.Equal(t, 0, q.ProcessingCount())
+}
+
+// TestCleanupStaleTasks_ZeroTimeout tests behavior with zero timeout
+// With zero timeout, ANY task that has been processing (StartedAt not zero) and
+// has an unhealthy worker will be cleaned immediately
+func TestCleanupStaleTasks_ZeroTimeout(t *testing.T) {
+	q := newTestQueue(100)
+
+	task := NewTask("/media/movie.mkv", TaskTypeTranscribe)
+	_ = q.Enqueue(task)
+	_, _ = q.Dequeue()
+
+	// Set task as old with unhealthy worker
+	q.mu.Lock()
+	q.processing[task.ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[task.ID].WorkerAddress = "worker:50051"
+	q.mu.Unlock()
+
+	healthyChecker := func(addr string) bool { return false }
+
+	// With zero timeout, task is cleaned because elapsed > 0 and worker unhealthy
+	cleaned := q.CleanupStaleTasks(0, healthyChecker)
+
+	assert.Equal(t, 1, cleaned)
+	assert.Equal(t, 0, q.ProcessingCount())
+}
+
+// TestCleanupStaleTasks_MixedWorkers tests multiple tasks with mixed worker health
+func TestCleanupStaleTasks_MixedWorkers(t *testing.T) {
+	q := newTestQueue(100)
+
+	// Create 5 tasks
+	for i := 1; i <= 5; i++ {
+		task := NewTask(fmt.Sprintf("/media/movie%d.mkv", i), TaskTypeTranscribe)
+		_ = q.Enqueue(task)
+	}
+
+	// Dequeue all
+	tasks := make([]*Task, 5)
+	for i := 0; i < 5; i++ {
+		tasks[i], _ = q.Dequeue()
+	}
+
+	// Setup different scenarios:
+	// Task 1: Old + unhealthy worker -> CLEANED
+	// Task 2: Old + healthy worker -> KEPT
+	// Task 3: Fresh + unhealthy worker -> KEPT (not stale)
+	// Task 4: Old + unknown worker -> CLEANED
+	// Task 5: Old + no worker assigned -> CLEANED
+	q.mu.Lock()
+	q.processing[tasks[0].ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[tasks[0].ID].WorkerAddress = "unhealthy:50051"
+
+	q.processing[tasks[1].ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[tasks[1].ID].WorkerAddress = "healthy:50051"
+
+	q.processing[tasks[2].ID].StartedAt = time.Now().Add(-5 * time.Minute)
+	q.processing[tasks[2].ID].WorkerAddress = "unhealthy:50051"
+
+	q.processing[tasks[3].ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	q.processing[tasks[3].ID].WorkerAddress = "unknown:50051"
+
+	q.processing[tasks[4].ID].StartedAt = time.Now().Add(-2 * time.Hour)
+	// WorkerAddress is "" (no assignment)
+	q.mu.Unlock()
+
+	healthyChecker := func(addr string) bool {
+		return addr == "healthy:50051"
+	}
+
+	cleaned := q.CleanupStaleTasks(1*time.Hour, healthyChecker)
+
+	// Should clean 3: tasks 1, 4, 5 (old + unhealthy/unknown/no-worker)
+	// Should keep 2: task 2 (old but healthy), task 3 (fresh)
+	assert.Equal(t, 3, cleaned)
+	assert.Equal(t, 2, q.ProcessingCount())
 }
 
 // TestQueue_GetTaskInfo verifies retrieving task info
@@ -448,7 +612,7 @@ func TestQueue_GetTaskInfo(t *testing.T) {
 // TestQueue_GetAllProcessingTaskInfo verifies getting all processing tasks
 func TestQueue_GetAllProcessingTaskInfo(t *testing.T) {
 	q := newTestQueue(100)
-	
+
 	task1 := NewTask("/media/movie1.mkv", TaskTypeTranscribe)
 	task2 := NewTask("/media/movie2.mkv", TaskTypeASR)
 	task3 := NewTask("/media/movie3.mkv", TaskTypeDetectLanguage)
@@ -480,7 +644,7 @@ func TestQueue_MarkDone_AddsToHistory(t *testing.T) {
 	// Queue, dequeue, then mark done
 	_ = q.Enqueue(task)
 	dequeued, _ := q.Dequeue()
-	
+
 	err := q.MarkDone(dequeued.ID)
 	require.NoError(t, err)
 
@@ -499,7 +663,7 @@ func TestQueue_MarkFailed_AddsToHistory(t *testing.T) {
 	// Queue, dequeue, then mark failed
 	_ = q.Enqueue(task)
 	dequeued, _ := q.Dequeue()
-	
+
 	err := q.MarkFailed(dequeued.ID, errors.New("test error"))
 	require.NoError(t, err)
 

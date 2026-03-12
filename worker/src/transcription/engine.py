@@ -9,7 +9,7 @@ import os
 import logging
 import sys
 import time
-from typing import Optional, Any, List
+from typing import Optional, Any, List, Callable
 from dataclasses import dataclass
 from pathlib import Path
 
@@ -86,6 +86,7 @@ class TranscriptionEngine:
         task_type: str,
         force_language: Optional[str],
         options: TranscribeOptions,
+        progress_callback: Optional[Callable[[int], None]] = None,
     ) -> TranscriptionResult:
         """
         Transcribe audio/video file to subtitles.
@@ -179,8 +180,15 @@ class TranscriptionEngine:
                 data, language=lang_code, task=task_type, **args
             )
 
-            # Convert generator to list to get segments
-            segments = list(segments_generator)
+            # Convert generator to list, calling progress callback for each segment
+            segments = []
+            for i, segment in enumerate(segments_generator, 1):
+                segments.append(segment)
+                if progress_callback:
+                    try:
+                        progress_callback(i)
+                    except Exception as e:
+                        logger.warning(f"Progress callback failed: {e}")
 
             # Create a result object compatible with stable-whisper expectations
             class FasterWhisperResult:

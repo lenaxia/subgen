@@ -1,14 +1,12 @@
 package monitor
 
 import (
-	"context"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
 
 	"github.com/mccloud/subgen/orchestrator/internal/config"
-	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/sirupsen/logrus"
 )
 
@@ -32,29 +30,26 @@ type Scanner interface {
 
 // BasicScanner is a scanner implementation that finds media files and queues them
 type BasicScanner struct {
-	queue       QueueInterface
-	skipChecker skip.Checker
-	log         *logrus.Logger
-	config      *config.Config
+	queue  QueueInterface
+	log    *logrus.Logger
+	config *config.Config
 }
 
 // NewScanner creates a new scanner instance
-func NewScanner(queue QueueInterface, skipChecker skip.Checker, cfg *config.Config) Scanner {
+func NewScanner(queue QueueInterface, cfg *config.Config) Scanner {
 	return &BasicScanner{
-		queue:       queue,
-		skipChecker: skipChecker,
-		log:         nil, // Optional logger
-		config:      cfg,
+		queue:  queue,
+		log:    nil, // Optional logger
+		config: cfg,
 	}
 }
 
 // NewScannerWithLogger creates a new scanner instance with logger for progress logging
-func NewScannerWithLogger(queue QueueInterface, skipChecker skip.Checker, log *logrus.Logger, cfg *config.Config) Scanner {
+func NewScannerWithLogger(queue QueueInterface, log *logrus.Logger, cfg *config.Config) Scanner {
 	return &BasicScanner{
-		queue:       queue,
-		skipChecker: skipChecker,
-		log:         log,
-		config:      cfg,
+		queue:  queue,
+		log:    log,
+		config: cfg,
 	}
 }
 
@@ -113,8 +108,6 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 		SkipReasons: make(map[string]int),
 	}
 
-	ctx := context.Background()
-
 	// Get batch scan limit from config (0 means unlimited)
 	batchScanLimit := 0
 	if s.config != nil {
@@ -161,36 +154,8 @@ func (s *BasicScanner) ScanDirectory(directory string, recursive bool, language 
 			s.log.WithFields(logrus.Fields{
 				"scanned": result.Scanned,
 				"queued":  result.Queued,
-				"skipped": result.Skipped,
 				"limit":   batchScanLimit,
 			}).Infof("Scan progress: %d files scanned", result.Scanned)
-		}
-
-		// Apply skip logic if checker is available
-		if s.skipChecker != nil {
-			checkResult, err := s.skipChecker.Check(ctx, path)
-			if err != nil {
-				// Log error but continue processing other files
-				if s.log != nil {
-					s.log.WithError(err).WithField("file_path", path).Error("Skip check failed")
-				}
-				return nil
-			}
-
-			if checkResult.ShouldSkip {
-				result.Skipped++
-				// Track skip reason
-				reasonKey := string(checkResult.Reason)
-				result.SkipReasons[reasonKey]++
-				if s.log != nil {
-					s.log.WithFields(map[string]interface{}{
-						"file_path": path,
-						"reason":    checkResult.Reason,
-						"details":   checkResult.Details,
-					}).Debug("File skipped")
-				}
-				return nil
-			}
 		}
 
 		// Queue file for transcription

@@ -214,3 +214,69 @@ func TestPool_ConcurrentSelection(t *testing.T) {
 		}
 	}
 }
+
+// TestPool_IsWorkerHealthy tests the IsWorkerHealthy method
+func TestPool_IsWorkerHealthy(t *testing.T) {
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+
+	workers := []discovery.Worker{
+		{ID: "worker-1", Address: "10.0.0.1:50051", Healthy: true, Active: 0},
+		{ID: "worker-2", Address: "10.0.0.2:50051", Healthy: false, Active: 0},
+		{ID: "worker-3", Address: "10.0.0.3:50051", Healthy: true, Active: 5},
+	}
+
+	mockDisc := &MockDiscovery{workers: workers}
+	pool := discovery.NewPool(mockDisc, discovery.RoundRobin, log)
+
+	ctx := context.Background()
+	err := pool.Start(ctx)
+	require.NoError(t, err)
+
+	// Test existing healthy worker
+	assert.True(t, pool.IsWorkerHealthy("10.0.0.1:50051"))
+
+	// Test existing unhealthy worker
+	assert.False(t, pool.IsWorkerHealthy("10.0.0.2:50051"))
+
+	// Test existing healthy worker with active jobs
+	assert.True(t, pool.IsWorkerHealthy("10.0.0.3:50051"))
+
+	// Test non-existent worker
+	assert.False(t, pool.IsWorkerHealthy("10.0.0.99:50051"))
+
+	// Test empty address
+	assert.False(t, pool.IsWorkerHealthy(""))
+}
+
+// TestPool_IsWorkerHealthy_AfterRefresh tests that health status updates after refresh
+func TestPool_IsWorkerHealthy_AfterRefresh(t *testing.T) {
+	log := logrus.New()
+	log.SetOutput(io.Discard)
+
+	initialWorkers := []discovery.Worker{
+		{ID: "worker-1", Address: "10.0.0.1:50051", Healthy: true, Active: 0},
+	}
+
+	mockDisc := &MockDiscovery{workers: initialWorkers}
+	pool := discovery.NewPool(mockDisc, discovery.RoundRobin, log)
+
+	ctx := context.Background()
+	err := pool.Start(ctx)
+	require.NoError(t, err)
+
+	// Initially healthy
+	assert.True(t, pool.IsWorkerHealthy("10.0.0.1:50051"))
+
+	// Update worker to unhealthy
+	mockDisc.workers = []discovery.Worker{
+		{ID: "worker-1", Address: "10.0.0.1:50051", Healthy: false, Active: 0},
+	}
+
+	// Refresh pool
+	err = pool.Refresh(ctx)
+	require.NoError(t, err)
+
+	// Now unhealthy
+	assert.False(t, pool.IsWorkerHealthy("10.0.0.1:50051"))
+}

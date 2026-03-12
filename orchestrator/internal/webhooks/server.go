@@ -15,7 +15,6 @@ import (
 	"github.com/mccloud/subgen/orchestrator/internal/observability"
 	"github.com/mccloud/subgen/orchestrator/internal/plex"
 	"github.com/mccloud/subgen/orchestrator/internal/queue"
-	"github.com/mccloud/subgen/orchestrator/internal/skip"
 	"github.com/mccloud/subgen/orchestrator/internal/util"
 	"github.com/mccloud/subgen/orchestrator/pkg/formats"
 	pb "github.com/mccloud/subgen/orchestrator/pkg/pb"
@@ -76,7 +75,6 @@ type Server struct {
 	pathMapper    *util.PathMapper
 	grpcClient    GRPCClientInterface    // For direct worker communication (language detection, etc.)
 	workerPool    WorkerPoolInterface    // For worker selection
-	skipChecker   skip.Checker           // For skip logic integration (STORY_07)
 	metrics       *observability.Metrics // For observability metrics (STORY_07)
 	plexClient    *plex.Client           // Plex API client (STORY_03)
 	episodeQueuer *plex.EpisodeQueuer    // Episode queueing (STORY_03)
@@ -150,11 +148,6 @@ func (s *Server) SetGRPCClient(client GRPCClientInterface) {
 // SetWorkerPool sets the worker pool for worker selection
 func (s *Server) SetWorkerPool(pool WorkerPoolInterface) {
 	s.workerPool = pool
-}
-
-// SetSkipChecker sets the skip checker for skip logic integration
-func (s *Server) SetSkipChecker(checker skip.Checker) {
-	s.skipChecker = checker
 }
 
 // SetMetrics sets the metrics for observability
@@ -323,36 +316,6 @@ func (s *Server) handlePlex(c *fiber.Ctx) error {
 	// - Authentication token management
 	// - Error handling for API failures
 	// - Testing with live Plex instances
-	//
-	// For now, skip checking is only available for Emby/Tautulli webhooks which
-	// provide file paths directly in their payloads.
-	//
-	// if s.skipChecker != nil && s.plexClient != nil {
-	//     filePath, err := s.plexClient.GetFilePath(c.Context(), ratingKey)
-	//     if err != nil {
-	//         s.log.WithError(err).Warn("Failed to fetch file path from Plex")
-	//     } else {
-	//         mappedPath, err := s.pathMapper.Map(filePath)
-	//         if err != nil {
-	//             s.log.WithError(err).Warn("Path mapping failed for Plex file")
-	//         } else {
-	//             result, err := s.skipChecker.Check(c.Context(), mappedPath)
-	//             if err != nil {
-	//                 s.log.WithError(err).Warn("Skip check failed, continuing with queue")
-	//             } else if result.ShouldSkip {
-	//                 s.log.WithFields(logrus.Fields{
-	//                     "reason":  result.Reason,
-	//                     "details": result.Details,
-	//                 }).Info("File skipped")
-	//                 if s.metrics != nil {
-	//                     s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
-	//                 }
-	//                 return c.SendString("")
-	//             }
-	//         }
-	//     }
-	// }
-
 	// Queue task
 	if err := s.queue.Enqueue(task); err != nil {
 		// Handle different error types with appropriate HTTP status codes
@@ -606,26 +569,6 @@ func (s *Server) handleEmby(c *fiber.Ctx) error {
 		"mapped_path":   mappedPath,
 	}).Debug("Path mapping applied")
 
-	// STORY_07: Check if file should be skipped
-	if s.skipChecker != nil {
-		result, err := s.skipChecker.Check(c.Context(), mappedPath)
-		if err != nil {
-			s.log.WithError(err).Warn("Skip check failed, continuing with queue")
-		} else if result.ShouldSkip {
-			s.log.WithFields(logrus.Fields{
-				"reason":  result.Reason,
-				"details": result.Details,
-			}).Info("File skipped")
-
-			// Record skip metric
-			if s.metrics != nil {
-				s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
-			}
-
-			return c.SendString("OK")
-		}
-	}
-
 	// Create task
 	task := Task{
 		FilePath: mappedPath,
@@ -704,26 +647,6 @@ func (s *Server) handleTautulli(c *fiber.Ctx) error {
 		"original_path": file,
 		"mapped_path":   mappedPath,
 	}).Debug("Path mapping applied")
-
-	// STORY_07: Check if file should be skipped
-	if s.skipChecker != nil {
-		result, err := s.skipChecker.Check(c.Context(), mappedPath)
-		if err != nil {
-			s.log.WithError(err).Warn("Skip check failed, continuing with queue")
-		} else if result.ShouldSkip {
-			s.log.WithFields(logrus.Fields{
-				"reason":  result.Reason,
-				"details": result.Details,
-			}).Info("File skipped")
-
-			// Record skip metric
-			if s.metrics != nil {
-				s.metrics.FilesSkipped.WithLabelValues(string(result.Reason)).Inc()
-			}
-
-			return c.SendString("OK")
-		}
-	}
 
 	// Create task
 	task := Task{

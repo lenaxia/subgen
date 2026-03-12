@@ -79,6 +79,9 @@ type Task struct {
 	QueuedAt    time.Time // When task was enqueued
 	StartedAt   time.Time // When task started processing (zero if not started)
 	CompletedAt time.Time // When task completed (zero if not completed)
+
+	// Worker assignment
+	WorkerAddress string // Address of worker processing this task (for stale detection)
 }
 
 // NewTask creates a new task with computed ID

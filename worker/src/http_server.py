@@ -113,6 +113,16 @@ def readyz():
             }
         ), 503
 
+    # Check for stuck job (no progress for too long)
+    if hasattr(_service, "_is_job_stuck") and _service._is_job_stuck():
+        return jsonify(
+            {
+                "status": "not_ready",
+                "reason": "job_stuck_no_progress",
+                "timeout_seconds": getattr(_service, "_progress_timeout_seconds", 300),
+            }
+        ), 503
+
     # Check disk space (models directory)
     model_path = _service.config.whisper.model_path
     if os.path.exists(model_path):

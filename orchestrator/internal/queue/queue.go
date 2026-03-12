@@ -263,8 +263,9 @@ func (q *Queue) GetProcessingTasks() []string {
 }
 
 // CleanupStaleTasks removes tasks that have been processing for longer than timeout
+// AND whose workers are unhealthy. Uses isWorkerHealthy callback to check worker status.
 // Returns the number of tasks cleaned up
-func (q *Queue) CleanupStaleTasks(timeout time.Duration) int {
+func (q *Queue) CleanupStaleTasks(timeout time.Duration, isWorkerHealthy func(addr string) bool) int {
 	q.mu.Lock()
 	defer q.mu.Unlock()
 
@@ -272,18 +273,23 @@ func (q *Queue) CleanupStaleTasks(timeout time.Duration) int {
 	cleaned := 0
 
 	for taskID, task := range q.processing {
-		if !task.StartedAt.IsZero() && now.Sub(task.StartedAt) > timeout {
-			q.log.WithFields(logrus.Fields{
-				"task_id":         taskID,
-				"file_path":       task.FilePath,
-				"processing_time": now.Sub(task.StartedAt),
-				"timeout":         timeout,
-			}).Warn("Cleaning up stale task")
+		elapsed := now.Sub(task.StartedAt)
+		if !task.StartedAt.IsZero() && elapsed > timeout {
+			workerHealthy := task.WorkerAddress != "" && isWorkerHealthy(task.WorkerAddress)
+			if !workerHealthy {
+				q.log.WithFields(logrus.Fields{
+					"task_id":         taskID,
+					"file_path":       task.FilePath,
+					"processing_time": elapsed,
+					"worker_address":  task.WorkerAddress,
+					"timeout":         timeout,
+				}).Warn("Cleaning up stale task (worker unhealthy)")
 
-			delete(q.processing, taskID)
-			q.metrics.ProcessingSize.Set(float64(len(q.processing)))
-			q.metrics.TasksFailed.WithLabelValues(string(task.Type)).Inc()
-			cleaned++
+				delete(q.processing, taskID)
+				q.metrics.ProcessingSize.Set(float64(len(q.processing)))
+				q.metrics.TasksFailed.WithLabelValues(string(task.Type)).Inc()
+				cleaned++
+			}
 		}
 	}
 
@@ -387,6 +393,6 @@ func (q *Queue) taskToTaskInfo(task *Task, status TaskStatus, errorMsg string) T
 	}
 
 	// TODO: Add OutputFile, Progress, ETASeconds, WorkerID when available
-	
+
 	return info
 }

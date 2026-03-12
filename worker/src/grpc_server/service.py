@@ -21,6 +21,7 @@ from pb import transcription_pb2
 from pb import transcription_pb2_grpc
 from transcription.model_manager import ModelManager, ModelConfig
 from transcription.engine import TranscriptionEngine, TranscribeOptions
+from subtitles.skip_checker import SkipChecker, SkipReason
 
 
 logger = logging.getLogger(__name__)
@@ -52,6 +53,13 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         }
         self.start_time: Optional[float] = time.time()
 
+        # Progress tracking for stuck job detection
+        self._progress_lock = __import__("threading").Lock()
+        self._current_job_id: Optional[str] = None
+        self._segments_processed: int = 0
+        self._last_progress_timestamp: float = 0
+        self._progress_timeout_seconds: int = 300  # 5 minutes without progress = stuck
+
         # Initialize model manager
         model_config = ModelConfig(
             model_name=config.whisper.model_name,
@@ -68,7 +76,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         # Initialize transcription engine
         self.engine = TranscriptionEngine(config)
 
-        logger.info("TranscriptionServicer initialized with model manager")
+        # Initialize skip checker
+        self.skip_checker = SkipChecker(config)
+
+        logger.info("TranscriptionServicer initialized with model manager and skip checker")
 
     def HealthCheck(
         self, request: transcription_pb2.HealthCheckRequest, context: grpc.ServicerContext
@@ -87,11 +98,17 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         # Update stats with current memory
         self.stats["memory_mb"] = memory_mb
 
-        # Determine health status based on memory
+        # Determine health status based on memory and stuck jobs
+        is_stuck = self._is_job_stuck()
         if memory_mb > self.config.system.memory_threshold_mb:
             status = transcription_pb2.HealthCheckResponse.UNHEALTHY
             logger.warning(
                 f"Worker unhealthy: memory {memory_mb}MB exceeds threshold {self.config.system.memory_threshold_mb}MB"
+            )
+        elif is_stuck:
+            status = transcription_pb2.HealthCheckResponse.UNHEALTHY
+            logger.warning(
+                f"Worker unhealthy: job stuck (no progress for {self._progress_timeout_seconds}s)"
             )
         else:
             status = transcription_pb2.HealthCheckResponse.HEALTHY
@@ -116,6 +133,44 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             f"HealthCheck response: status={status}, memory={memory_mb}MB, uptime={uptime}s"
         )
         return response
+
+    def _update_progress(self, segments_count: int) -> None:
+        """
+        Update progress tracking for the current job.
+        Called during transcription as segments are processed.
+        """
+        with self._progress_lock:
+            self._segments_processed = segments_count
+            self._last_progress_timestamp = time.time()
+
+    def _start_job_tracking(self, job_id: str) -> None:
+        """Initialize progress tracking for a new job."""
+        with self._progress_lock:
+            self._current_job_id = job_id
+            self._segments_processed = 0
+            self._last_progress_timestamp = time.time()
+
+    def _end_job_tracking(self) -> None:
+        """Clear progress tracking after job completes."""
+        with self._progress_lock:
+            self._current_job_id = None
+            self._segments_processed = 0
+            self._last_progress_timestamp = 0
+
+    def _is_job_stuck(self) -> bool:
+        """
+        Check if the current job is stuck (no progress for too long).
+        Returns True if job appears stuck, False otherwise.
+        """
+        with self._progress_lock:
+            if self._current_job_id is None:
+                return False
+
+            if self._last_progress_timestamp == 0:
+                return False
+
+            elapsed = time.time() - self._last_progress_timestamp
+            return elapsed > self._progress_timeout_seconds
 
     def DetectLanguage(
         self, request: transcription_pb2.DetectLanguageRequest, context: grpc.ServicerContext
@@ -201,17 +256,53 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 logger.error(f"Transcribe: file not found: {request.file_path}")
                 context.abort(grpc.StatusCode.NOT_FOUND, f"File not found: {request.file_path}")
 
-            # Skip check: if subtitle already exists and config says to skip, return early
-            if self.config.skip.skip_if_target_subtitles_exist:
-                base = os.path.splitext(request.file_path)[0]
-                existing = glob.glob(f"{base}.subgen.*.*.srt") + glob.glob(f"{base}.subgen.*.*.lrc")
-                if existing:
-                    logger.info(f"Skipping transcription, subtitle already exists: {existing[0]}")
-                    return transcription_pb2.TranscribeResponse(
-                        success=True,
-                        subtitle_path=existing[0],
-                        detected_language="",
+            # Comprehensive skip check
+            skip_result = self.skip_checker.check(request.file_path)
+            if skip_result.should_skip:
+                reason_str = skip_result.reason.value if skip_result.reason else "unknown"
+                logger.info(f"Skipping transcription: {reason_str} - {skip_result.details}")
+
+                # For target subtitle existence, return the existing subtitle path
+                if skip_result.reason in [SkipReason.SUBTITLE_EXISTS, SkipReason.LRC_EXISTS]:
+                    base = os.path.splitext(request.file_path)[0]
+                    existing = glob.glob(f"{base}.subgen.*.*.srt") + glob.glob(
+                        f"{base}.subgen.*.*.lrc"
                     )
+                    existing += glob.glob(f"{base}.srt") + glob.glob(f"{base}.lrc")
+                    if existing:
+                        return transcription_pb2.TranscribeResponse(
+                            success=True,
+                            subtitle_path=existing[0],
+                            detected_language="",
+                        )
+
+                # For other skip reasons, return success with no subtitle
+                return transcription_pb2.TranscribeResponse(
+                    success=True,
+                    subtitle_path="",
+                    detected_language="",
+                )
+
+                # For target subtitle existence, return the existing subtitle path
+                if skip_result.reason in [SkipReason.SUBTITLE_EXISTS, SkipReason.LRC_EXISTS]:
+                    base = os.path.splitext(request.file_path)[0]
+                    existing = glob.glob(f"{base}.subgen.*.*.srt") + glob.glob(
+                        f"{base}.subgen.*.*.lrc"
+                    )
+                    existing += glob.glob(f"{base}.srt") + glob.glob(f"{base}.lrc")
+                    if existing:
+                        return transcription_pb2.TranscribeResponse(
+                            success=True,
+                            subtitle_path=existing[0],
+                            detected_language="",
+                        )
+
+                # For other skip reasons, return success with no subtitle
+                return transcription_pb2.TranscribeResponse(
+                    success=True,
+                    subtitle_path="",
+                    detected_language="",
+                )
 
         elif request.WhichOneof("audio_source") == "audio_content":
             source_type = "bytes"
@@ -270,12 +361,21 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
 
             # Perform transcription
             logger.info(f"Starting transcription (source_type={source_type})")
-            result = self.engine.transcribe(
-                source=source,
-                task_type=task_type,
-                force_language=request.force_language if request.force_language else None,
-                options=options,
-            )
+
+            # Start progress tracking
+            job_id = f"job_{int(time.time() * 1000)}"
+            self._start_job_tracking(job_id)
+
+            try:
+                result = self.engine.transcribe(
+                    source=source,
+                    task_type=task_type,
+                    force_language=request.force_language if request.force_language else None,
+                    options=options,
+                    progress_callback=self._update_progress,
+                )
+            finally:
+                self._end_job_tracking()
 
             # Update stats
             self.stats["jobs_processed"] += 1
