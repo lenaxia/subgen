@@ -37,7 +37,7 @@ func BenchmarkScanner_10000Files(b *testing.B) {
 			BatchScanLimit: 0,
 		},
 	}
-	scanner := monitor.NewScanner(nil, nil, cfg)
+	scanner := monitor.NewScanner(nil, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
@@ -74,7 +74,7 @@ func BenchmarkScanner_1000Files(b *testing.B) {
 			BatchScanLimit: 0,
 		},
 	}
-	scanner := monitor.NewScanner(nil, nil, cfg)
+	scanner := monitor.NewScanner(nil, cfg)
 
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {

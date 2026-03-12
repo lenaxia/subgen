@@ -277,7 +277,7 @@ func TestMonitor_Integration_StartupScan(t *testing.T) {
 			BatchScanLimit: 0,
 		},
 	}
-	scanner := monitor.NewScannerWithLogger(nil, nil, log, cfg)
+	scanner := monitor.NewScannerWithLogger(nil, log, cfg)
 
 	// Scan directory
 	result, err := scanner.ScanDirectory(tmpDir, true, "en")
