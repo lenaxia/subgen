@@ -1,8 +1,9 @@
 from enum import Enum
 
+
 class LanguageCode(Enum):
     # ISO 639-1, ISO 639-2/T, ISO 639-2/B, English Name, Native Name
-    AFAR = ("aa", "aar", "aar", "Afar", "Afar") 
+    AFAR = ("aa", "aar", "aar", "Afar", "Afar")
     AFRIKAANS = ("af", "afr", "afr", "Afrikaans", "Afrikaans")
     AMHARIC = ("am", "amh", "amh", "Amharic", "አማርኛ")
     ARABIC = ("ar", "ara", "ara", "Arabic", "العربية")
@@ -102,6 +103,20 @@ class LanguageCode(Enum):
     YIDDISH = ("yi", "yid", "yid", "Yiddish", "ייִדיש")
     YORUBA = ("yo", "yor", "yor", "Yoruba", "Yorùbá")
     CHINESE = ("zh", "zho", "chi", "Chinese", "中文")
+    CHINESE_TRADITIONAL = (
+        "zh-tw",
+        "zho-tw",
+        "chi",
+        "Chinese (Traditional)",
+        "中文（繁體）",
+    )
+    CHINESE_SIMPLIFIED = (
+        "zh-cn",
+        "zho-cn",
+        "chi",
+        "Chinese (Simplified)",
+        "中文（简体）",
+    )
     CANTONESE = ("yue", "yue", "yue", "Cantonese", "粵語")
     NONE = (None, None, None, None, None)  # For no language
     # und for Undetermined aka unknown language https://www.loc.gov/standards/iso639-2/faq.html#25
@@ -128,15 +143,17 @@ class LanguageCode(Enum):
         return LanguageCode.NONE
 
     @staticmethod
-    def from_name(name : str):
+    def from_name(name: str):
         """Convert a language name (either English or native) to LanguageCode enum."""
         for lang in LanguageCode:
-            if lang.name_en.lower() == name.lower() or lang.name_native.lower() == name.lower():
+            if (
+                lang.name_en.lower() == name.lower()
+                or lang.name_native.lower() == name.lower()
+            ):
                 return lang
         LanguageCode.NONE
-        
 
-    @staticmethod    
+    @staticmethod
     def from_string(value: str):
         """
         Convert a string to a LanguageCode instance. Matches on ISO codes, English name, or native name.
@@ -156,12 +173,12 @@ class LanguageCode(Enum):
             ):
                 return lang
         return LanguageCode.NONE
-    
+
     # is valid language
     @staticmethod
     def is_valid_language(language: str):
         return LanguageCode.from_string(language) is not LanguageCode.NONE
-    
+
     def to_iso_639_1(self):
         return self.iso_639_1
 
@@ -173,14 +190,15 @@ class LanguageCode(Enum):
 
     def to_name(self, in_english=True):
         return self.name_en if in_english else self.name_native
+
     def __str__(self):
         if self.name_en is None:
             return "Unknown"
         return self.name_en
-    
+
     def __bool__(self):
         return True if self.iso_639_1 is not None else False
-    
+
     def __eq__(self, other):
         """
         Compare the LanguageCode instance to another object.
