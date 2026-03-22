@@ -208,7 +208,7 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 source, sample_length=30, sample_offset=0
             )
             audio_language = (
-                detection_result.language_code.lower() if detection_result.success else ""
+                detection_result.language_code.lower() if detection_result.language_code else ""
             )
 
             if not audio_language:
@@ -453,27 +453,6 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             if skip_result.should_skip:
                 reason_str = skip_result.reason.value if skip_result.reason else "unknown"
                 logger.info(f"Skipping transcription: {reason_str} - {skip_result.details}")
-
-                # For target subtitle existence, return the existing subtitle path
-                if skip_result.reason in [SkipReason.SUBTITLE_EXISTS, SkipReason.LRC_EXISTS]:
-                    base = os.path.splitext(request.file_path)[0]
-                    existing = glob.glob(f"{base}.subgen.*.*.srt") + glob.glob(
-                        f"{base}.subgen.*.*.lrc"
-                    )
-                    existing += glob.glob(f"{base}.srt") + glob.glob(f"{base}.lrc")
-                    if existing:
-                        return transcription_pb2.TranscribeResponse(
-                            success=True,
-                            subtitle_path=existing[0],
-                            detected_language="",
-                        )
-
-                # For other skip reasons, return success with no subtitle
-                return transcription_pb2.TranscribeResponse(
-                    success=True,
-                    subtitle_path="",
-                    detected_language="",
-                )
 
                 # For target subtitle existence, return the existing subtitle path
                 if skip_result.reason in [SkipReason.SUBTITLE_EXISTS, SkipReason.LRC_EXISTS]:
