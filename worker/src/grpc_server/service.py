@@ -53,6 +53,13 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         }
         self.start_time: Optional[float] = time.time()
 
+        # Semaphore: only 1 transcription job at a time.
+        # Whisper is single-threaded by design; concurrent jobs share model
+        # state (condition_on_previous_text context) and thrash the CPU.
+        # A second Transcribe() call while one is active returns RESOURCE_EXHAUSTED
+        # so the orchestrator's LeastLoaded strategy re-routes it to another worker.
+        self._job_semaphore = __import__("threading").Semaphore(1)
+
         # Progress tracking for stuck job detection
         self._progress_lock = __import__("threading").Lock()
         self._current_job_id: Optional[str] = None
@@ -505,6 +512,17 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         if request.metadata:
             logger.debug(f"Transcribe: metadata={dict(request.metadata)}")
 
+        # Enforce single-job concurrency: Whisper is not safe to run in parallel.
+        # If another job is already running, reject immediately so the orchestrator
+        # can route this request to a different worker.
+        if not self._job_semaphore.acquire(blocking=False):
+            logger.info("Worker busy (1 job already running), returning RESOURCE_EXHAUSTED")
+            context.abort(
+                grpc.StatusCode.RESOURCE_EXHAUSTED,
+                "Worker is busy processing another transcription job",
+            )
+            return transcription_pb2.TranscribeResponse(success=False, error_message="busy")
+
         # Track active jobs
         self.stats["jobs_active"] += 1
         start_time = time.time()
@@ -645,8 +663,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             )
 
         finally:
-            # Always decrement active jobs
+            # Always decrement active jobs and release semaphore
             self.stats["jobs_active"] -= 1
+            self._job_semaphore.release()
             logger.debug(f"Transcribe: jobs_active={self.stats['jobs_active']}")
 
             # Schedule model cleanup if no active jobs and cleanup is enabled
