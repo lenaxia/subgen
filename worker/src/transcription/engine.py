@@ -51,6 +51,14 @@ class TranscribeOptions:
     show_subgen_in_filename: bool = True
     target_language: Optional[str] = None  # Output language for translated subtitles
 
+    # Whisper quality / sync parameters
+    vad_filter: bool = True  # Strip non-speech (music, silence) before processing
+    condition_on_previous_text: bool = False  # Prevent compounding drift across 30s chunks
+    repetition_penalty: float = 1.3  # Penalise repeated phrases / hallucination loops
+    no_speech_threshold: float = 0.3  # More aggressively skip uncertain non-speech segments
+    hallucination_silence_threshold: Optional[float] = 2.0  # Drop segments inside >Xs of silence
+    word_timestamps: bool = True  # Per-word timing for tighter line boundaries
+
 
 @dataclass
 class TranscriptionResult:
@@ -175,13 +183,17 @@ class TranscriptionEngine:
                     extracted_audio.close()
 
             # Prepare transcription args
-            args = {}
-
-            # Note: regroup is a stable-whisper feature, not available in faster-whisper
-            # We're using stable-whisper wrapper around faster-whisper, so check if regroup is supported
-            # For now, skip custom_regroup since we're using load_faster_whisper
-            # if options.custom_regroup and options.custom_regroup.lower() != "default":
-            #     args["regroup"] = options.custom_regroup
+            args = {
+                "vad_filter": options.vad_filter,
+                "condition_on_previous_text": options.condition_on_previous_text,
+                "repetition_penalty": options.repetition_penalty,
+                "no_speech_threshold": options.no_speech_threshold,
+                "word_timestamps": options.word_timestamps,
+            }
+            if options.hallucination_silence_threshold is not None:
+                args["hallucination_silence_threshold"] = options.hallucination_silence_threshold
+            if options.custom_prompt:
+                args["initial_prompt"] = options.custom_prompt
 
             # faster-whisper returns (segments_generator, info) where segments_generator
             # is a lazy iterator. We deliberately do NOT call list() by default —

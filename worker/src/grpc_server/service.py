@@ -251,6 +251,12 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     show_model_in_filename=options.show_model_in_filename,
                     show_subgen_in_filename=options.show_subgen_in_filename,
                     target_language=output_lang_lower,
+                    vad_filter=options.vad_filter,
+                    condition_on_previous_text=options.condition_on_previous_text,
+                    repetition_penalty=options.repetition_penalty,
+                    no_speech_threshold=options.no_speech_threshold,
+                    hallucination_silence_threshold=options.hallucination_silence_threshold,
+                    word_timestamps=options.word_timestamps,
                 )
 
                 # Perform transcription
