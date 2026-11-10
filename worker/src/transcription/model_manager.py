@@ -19,9 +19,9 @@ import os
 import gc
 import ctypes
 import ctypes.util
-from threading import Lock, Timer, Event
-from typing import Optional, Any
-from dataclasses import dataclass
+from threading import RLock, Timer, Event
+from typing import Optional, Any, Callable
+from dataclasses import dataclass, field
 from types import TracebackType
 
 import stable_whisper
@@ -44,6 +44,13 @@ class ModelConfig:
         compute_type: Computation type (auto, int8, int8_float16, float16, float32)
         cleanup_delay: Delay in seconds before cleanup (default: 30)
         clear_vram: Whether to clear VRAM on cleanup (default: True)
+        unload_on_idle: Whether to unload the model after the cleanup delay.
+            None (default) = auto: unload only on CUDA devices. Repeated
+            load/unload cycles on CPU fragment the native heap and cause RSS
+            to ratchet upward (~20MB+ per cycle); keeping the model resident
+            on CPU keeps memory flat. Set True to force unloading on CPU
+            (e.g. memory-constrained deployments with sparse jobs), False to
+            never unload.
     """
 
     model_name: str = "medium"
@@ -54,6 +61,7 @@ class ModelConfig:
     compute_type: str = "auto"
     cleanup_delay: int = 30
     clear_vram: bool = True
+    unload_on_idle: Optional[bool] = None
 
 
 class ModelManager:
@@ -91,17 +99,21 @@ class ModelManager:
 
     def __init__(self, config: ModelConfig):
         """
-        Initialize ModelManager with configuration.
+        Initialize ModelManager with ModelConfig.
 
         Args:
             config: ModelConfig instance with model settings
         """
         self.config = config
         self._model: Optional[Any] = None
-        self._lock = Lock()
+        self._lock = RLock()
         self._cleanup_timer: Optional[Timer] = None
         self._cleanup_event = Event()
         self._context_depth = 0  # For nested context managers
+
+        # Optional callback invoked after the model has been unloaded,
+        # so owners (e.g. TranscriptionEngine) can drop stale references.
+        self.on_unload: Optional[Callable[[], None]] = None
 
         # Statistics
         self._load_count = 0
@@ -110,8 +122,20 @@ class ModelManager:
 
         logger.debug(
             f"ModelManager initialized: model={config.model_name}, "
-            f"device={config.device}, cleanup_delay={config.cleanup_delay}s"
+            f"device={config.device}, cleanup_delay={config.cleanup_delay}s, "
+            f"unload_on_idle={self._should_unload_on_idle()}"
         )
+
+    def _should_unload_on_idle(self) -> bool:
+        """Whether the model should be unloaded after the cleanup delay.
+
+        Auto mode (unload_on_idle=None): only on CUDA devices, where the
+        model occupies scarce VRAM. On CPU, load/unload churn fragments the
+        native heap and RSS ratchets upward with each cycle.
+        """
+        if self.config.unload_on_idle is not None:
+            return self.config.unload_on_idle
+        return self.config.device.lower() in ("cuda", "gpu")
 
     def load(self) -> Any:
         """
@@ -178,7 +202,11 @@ class ModelManager:
         This method is idempotent - safe to call multiple times.
 
         Thread Safety:
-            Safe to call from multiple threads simultaneously.
+            Safe to call from multiple threads simultaneously. Model
+            reference release is done under the lock; the heavyweight
+            cleanup steps (gc.collect / malloc_trim, which can take many
+            seconds on a large heap) run OUTSIDE the lock so they never
+            block HealthCheck or Transcribe threads.
         """
         with self._lock:
             if self._model is None:
@@ -188,52 +216,61 @@ class ModelManager:
             logger.info("Unloading Whisper model from memory")
             start_time = time.time()
 
+            # Step 1: Unload Whisper model
             try:
-                # Step 1: Unload Whisper model
-                try:
-                    self._model.model.unload_model()
-                except Exception as e:
-                    logger.error(f"Failed to unload model: {e}")
-
-                # Always clear model reference even if unload failed
-                del self._model
-                self._model = None
-                logger.debug("Model reference cleared from memory")
-
-                # Step 2: Clear CUDA cache if using GPU
-                if self.config.device.lower() == "cuda" and torch.cuda.is_available():
-                    try:
-                        torch.cuda.empty_cache()
-                        logger.debug("CUDA cache cleared")
-                    except Exception as e:
-                        logger.error(f"Failed to clear CUDA cache: {e}")
-
-                # Step 3: Garbage collection (not on Windows)
-                if os.name != "nt":
-                    gc.collect()
-
-                    # Step 4: Return memory to OS (Linux only)
-                    try:
-                        libc = ctypes.CDLL(ctypes.util.find_library("c"))
-                        libc.malloc_trim(0)
-                        logger.debug("Memory returned to OS via malloc_trim")
-                    except Exception as e:
-                        logger.debug(f"malloc_trim not available: {e}")
-
-                cleanup_time = time.time() - start_time
-                self._cleanup_count += 1
-                self._total_cleanup_time += cleanup_time
-
-                logger.info(
-                    f"Model cleanup completed in {cleanup_time:.2f}s "
-                    f"(total cleanups: {self._cleanup_count}, "
-                    f"avg time: {self._total_cleanup_time / self._cleanup_count:.2f}s)"
-                )
-
+                self._model.model.unload_model()
             except Exception as e:
-                logger.error(f"Error during model cleanup: {e}", exc_info=True)
-                # Still mark as unloaded even if cleanup failed
-                self._model = None
+                logger.error(f"Failed to unload model: {e}")
+
+            # Always clear model reference even if unload failed
+            model = self._model
+            self._model = None
+            del model
+
+        # ---- lock released: heavyweight cleanup must not block others ----
+
+        try:
+            # Step 2: Clear CUDA cache if using GPU
+            if self.config.device.lower() == "cuda" and torch.cuda.is_available():
+                try:
+                    torch.cuda.empty_cache()
+                    logger.debug("CUDA cache cleared")
+                except Exception as e:
+                    logger.error(f"Failed to clear CUDA cache: {e}")
+
+            # Step 3: Garbage collection (not on Windows)
+            if os.name != "nt":
+                gc.collect()
+
+                # Step 4: Return memory to OS (Linux only)
+                try:
+                    libc = ctypes.CDLL(ctypes.util.find_library("c"))
+                    libc.malloc_trim(0)
+                    logger.debug("Memory returned to OS via malloc_trim")
+                except Exception as e:
+                    logger.debug(f"malloc_trim not available: {e}")
+        except Exception as e:
+            logger.error(f"Error during model cleanup: {e}", exc_info=True)
+
+        cleanup_time = time.time() - start_time
+        with self._lock:
+            self._cleanup_count += 1
+            self._total_cleanup_time += cleanup_time
+
+        logger.info(
+            f"Model cleanup completed in {cleanup_time:.2f}s "
+            f"(total cleanups: {self._cleanup_count}, "
+            f"avg time: {self._total_cleanup_time / self._cleanup_count:.2f}s"
+        )
+
+        # Notify owners so they can drop stale model references
+        # (e.g. TranscriptionEngine.model) that would otherwise pin
+        # the unloaded model in memory.
+        if self.on_unload is not None:
+            try:
+                self.on_unload()
+            except Exception as e:
+                logger.error(f"on_unload callback failed: {e}")
 
     def schedule_cleanup(self, delay: Optional[int] = None) -> None:
         """
@@ -253,6 +290,15 @@ class ModelManager:
         """
         if delay is None:
             delay = self.config.cleanup_delay
+
+        if not self._should_unload_on_idle():
+            logger.debug(
+                "Idle unload disabled for device=%s (model kept resident to avoid "
+                "load/unload memory fragmentation); cancelling any pending cleanup",
+                self.config.device,
+            )
+            self.cancel_cleanup()
+            return
 
         with self._lock:
             # Cancel existing timer (prevents memory leak)
@@ -426,7 +472,9 @@ class ModelManager:
         """
         with self._lock:
             self._context_depth -= 1
+            # Decide under the lock; unload() manages its own locking so the
+            # heavyweight cleanup runs outside of it.
+            should_unload = self._context_depth == 0
 
-            # Only unload on outermost exit
-            if self._context_depth == 0:
-                self.unload()
+        if should_unload:
+            self.unload()

@@ -470,6 +470,19 @@ class ModelLifecycleConfig(BaseSettings):
         default=True,
         description="Clear CUDA VRAM after transcription",
     )
+    unload_on_idle: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("UNLOAD_MODEL_ON_IDLE", "MODEL_UNLOAD_ON_IDLE"),
+        description="""Whether to unload the Whisper model after cleanup_delay seconds of idle.
+
+        Default (None) = auto: unload only when TRANSCRIBE_DEVICE=cuda. On CPU,
+        repeated load/unload cycles fragment the native heap and RSS grows
+        ~20-30MB per cycle (measured: +200MB over 10 job cycles with the tiny
+        model; worse with medium). Keeping the model resident on CPU keeps
+        memory flat at the cost of idle RAM. Set true to force CPU unloads
+        (sparse jobs, tight memory), false to never unload.
+        """,
+    )
 
 
 class WorkerSettings(BaseSettings):

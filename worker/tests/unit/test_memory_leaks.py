@@ -19,11 +19,14 @@ from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 
-# Mock modules before importing our code
-sys.modules["stable_whisper"] = MagicMock()
-sys.modules["torch"] = MagicMock()
-sys.modules["ffmpeg"] = MagicMock()
-sys.modules["av"] = MagicMock()
+# Mock heavy ML modules ONLY when they are not installed. Poisoning
+# sys.modules unconditionally breaks other test files that lazily import
+# the real modules at runtime (e.g. audio.extractor's `import av`).
+for _mod in ("stable_whisper", "torch", "ffmpeg", "av"):
+    try:
+        __import__(_mod)
+    except ImportError:
+        sys.modules[_mod] = MagicMock()
 
 from transcription.model_manager import ModelManager, ModelConfig
 from audio.extractor import extract_audio_segment, extract_audio_track, AudioExtractionError
@@ -34,7 +37,7 @@ class TestTimerThreadLeak:
 
     def test_timer_cleanup_no_accumulation(self):
         """Verify cancelled timers don't accumulate threads."""
-        config = ModelConfig(cleanup_delay=10)
+        config = ModelConfig(cleanup_delay=10, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Get initial thread count
@@ -67,7 +70,7 @@ class TestTimerThreadLeak:
     @pytest.mark.stress
     def test_timer_stress_500_cycles(self):
         """Stress test: 500 schedule/cancel cycles should not leak threads."""
-        config = ModelConfig(cleanup_delay=5)
+        config = ModelConfig(cleanup_delay=5, unload_on_idle=True)
         manager = ModelManager(config)
 
         initial_threads = threading.active_count()
@@ -94,7 +97,7 @@ class TestTimerThreadLeak:
 
     def test_cleanup_timer_properly_cancelled(self):
         """Test that cleanup timer is properly cancelled."""
-        config = ModelConfig(cleanup_delay=1)
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Schedule cleanup
@@ -314,7 +317,7 @@ class TestStressTests:
 
     def test_concurrent_operations_no_deadlock(self):
         """Test concurrent operations don't deadlock or leak."""
-        config = ModelConfig(cleanup_delay=1)
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Spawn multiple threads doing schedule/cancel
@@ -338,6 +341,92 @@ class TestStressTests:
 
 class TestMemoryLeakDocumentation:
     """Tests that document the memory leak fixes."""
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_context_manager_no_deadlock(self, mock_whisper):
+        """Regression: __exit__ must not deadlock.
+
+        LEGACY BUG: ModelManager used threading.Lock (non-reentrant) and
+        __exit__ called self.unload() while still holding self._lock,
+        deadlocking the thread forever (reproduced: faulthandler showed
+        unload blocked on `with self._lock` at model_manager.py:183).
+
+        stable_whisper is patched so the timing stays deterministic: a
+        real load_faster_whisper call takes 10s+ (or downloads 1.5GB on
+        a cold cache), which trips the 10s join timeout below and reads
+        as a false deadlock.
+        """
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        result = {}
+
+        def run():
+            with manager:
+                result["loaded"] = manager.is_loaded()
+            result["done"] = True
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(timeout=10)
+        assert not t.is_alive(), "ModelManager context manager deadlocked"
+        assert result.get("done") is True
+        assert not manager.is_loaded()
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_unload_invokes_on_unload_callback(self, mock_whisper):
+        """unload() must notify owners so stale references are dropped.
+
+        LEGACY BUG: TranscriptionServicer set engine.model = model but never
+        cleared it on unload; the engine kept the unloaded WhisperModel
+        (and its ctranslate2 runtime state) pinned until the next job.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        called = []
+        manager.on_unload = lambda: called.append(True)
+        manager.load()
+        manager.unload()
+        assert called == [True]
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_schedule_cleanup_noop_on_cpu(self, mock_whisper):
+        """Idle unload must be skipped on CPU by default.
+
+        LEGACY BUG: clear_vram_on_complete=true (default) unloaded the model
+        after every job even on CPU. Repeated load->transcribe->unload cycles
+        fragment the native heap: measured +20-30MB RSS per cycle, +200MB
+        over 10 job cycles with the tiny model (worse with medium). Keeping
+        the model resident on CPU keeps RSS flat.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(device="cpu", cleanup_delay=1)
+        manager = ModelManager(config)
+        manager.load()
+        manager.schedule_cleanup(delay=0.1)
+        assert manager._cleanup_timer is None  # no timer scheduled on CPU
+        time.sleep(0.3)
+        assert manager.is_loaded()  # model stays resident
+
+    def test_schedule_cleanup_active_on_cuda(self):
+        """Idle unload still applies on CUDA (frees VRAM)."""
+        config = ModelConfig(device="cuda", cleanup_delay=1)
+        manager = ModelManager(config)
+        manager.schedule_cleanup(delay=5)
+        assert manager._cleanup_timer is not None
+        manager.cancel_cleanup()
+
+    def test_schedule_cleanup_forced_on_cpu(self):
+        """unload_on_idle=True forces CPU unloads (opt-in for sparse jobs)."""
+        config = ModelConfig(device="cpu", cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.schedule_cleanup(delay=5)
+        assert manager._cleanup_timer is not None
+        manager.cancel_cleanup()
 
     def test_leak_1_timer_thread_documented(self):
         """

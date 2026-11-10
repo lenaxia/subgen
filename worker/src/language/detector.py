@@ -7,6 +7,7 @@ Extracted from subgen.py:
 """
 
 import logging
+import os
 import sys
 from typing import Union, Optional, Any
 from dataclasses import dataclass
@@ -43,9 +44,15 @@ def detect_language_from_file(
     sample_length: int = 30,
 ) -> LanguageDetectionResult:
     """
-    Detect language from audio file.
+    Detect language from a short audio sample extracted from the file.
 
     Extracted from: subgen.py:1050-1098
+
+    Only a [sample_offset, sample_offset + sample_length] clip is decoded —
+    never the full file. faster-whisper detects language from the first
+    window of features, so the segments generator is deliberately NOT
+    consumed: iterating it would decode the entire sample (and, on a full
+    file, the entire movie) which is wasted work and peak memory.
 
     Args:
         file_path: Path to media file
@@ -59,17 +66,25 @@ def detect_language_from_file(
     Raises:
         LanguageDetectionError: If detection fails
     """
+    import tempfile
+
+    from audio.extractor import extract_audio_segment
+
+    temp_path = None
     try:
         logger.info(f"Detecting language: {file_path} ({sample_length}s from {sample_offset}s)")
 
-        # For faster-whisper, we can use detect_language_multi_segment or transcribe a small sample
-        # The model.transcribe() will auto-detect language, so let's use that
-        segments_generator, info = model.transcribe(file_path, beam_size=5)
+        # Extract only the sample we need. The context manager closes the
+        # buffer; we need the bytes on disk for faster-whisper.
+        with extract_audio_segment(file_path, sample_offset, sample_length) as sample:
+            with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
+                tf.write(sample.read())
+                temp_path = tf.name
 
-        # We don't need the segments, just the language info
-        # Consume the generator to complete detection
-        _ = list(segments_generator)
+        segments_generator, info = model.transcribe(temp_path, beam_size=5)
 
+        # Language is detected from the initial features; do NOT iterate the
+        # generator — that would decode the whole sample for nothing.
         detected_lang = LanguageCode.from_iso_639_1(info.language)
 
         logger.info(
@@ -82,9 +97,17 @@ def detect_language_from_file(
             confidence=info.language_probability,
         )
 
+    except LanguageDetectionError:
+        raise
     except Exception as e:
         logger.error(f"Language detection failed: {e}", exc_info=True)
         raise LanguageDetectionError(f"Failed to detect language: {e}")
+    finally:
+        if temp_path and os.path.exists(temp_path):
+            try:
+                os.unlink(temp_path)
+            except Exception as cleanup_error:
+                logger.warning(f"Failed to clean up temp file {temp_path}: {cleanup_error}")
 
 
 def detect_language_from_bytes(
@@ -118,11 +141,11 @@ def detect_language_from_bytes(
             f"Written {len(audio_bytes)} bytes to temp file for language detection: {file_path}"
         )
 
-        # Use the file path version for detection
+        # Detect on the temp file; language comes from info immediately.
+        # Do NOT iterate the segments generator — that decodes all audio
+        # for nothing (Bazarr samples are short, but the full decode is
+        # still wasted work and memory).
         segments_generator, info = model.transcribe(file_path, beam_size=5)
-
-        # Consume the generator to complete detection
-        _ = list(segments_generator)
 
         detected_lang = LanguageCode.from_iso_639_1(info.language)
 

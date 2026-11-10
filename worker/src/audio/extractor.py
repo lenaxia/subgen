@@ -156,20 +156,19 @@ def extract_audio_track(file_path: str, track_index: int) -> Generator[io.BytesI
             buffer.close()
 
 
-def handle_multiple_audio_tracks(
+def select_audio_track(
     file_path: str, preferred_language: Optional[str] = None
-) -> Optional[io.BytesIO]:
+) -> Optional[AudioTrackInfo]:
     """
-    Extract audio from file with multiple tracks.
-
-    Extracted from: subgen.py:1318-1350
+    Select the best audio track from a file, if it has multiple tracks.
 
     Args:
         file_path: Path to media file
         preferred_language: Preferred language code (e.g., "eng", "jpn")
 
     Returns:
-        BytesIO with audio data if multiple tracks exist, None otherwise
+        Selected AudioTrackInfo if the file has multiple tracks, None if it
+        has a single track (nothing to select).
     """
     tracks = get_audio_tracks(file_path)
 
@@ -182,13 +181,93 @@ def handle_multiple_audio_tracks(
             f"  Track {track.index}: {track.codec} {track.language} {'(default)' if track.is_default else ''}"
         )
 
-    # Select track
     selected_track = None
     if preferred_language:
         selected_track = next((t for t in tracks if t.language == preferred_language), None)
 
     if not selected_track:
         selected_track = next((t for t in tracks if t.is_default), tracks[0])
+
+    return selected_track
+
+
+def extract_audio_track_to_file(
+    file_path: str, track_index: int, dest_path: str, chunk_size: int = 1024 * 1024
+) -> str:
+    """
+    Extract an audio track to a WAV file on disk, streaming.
+
+    Unlike extract_audio_track (which accumulates the entire WAV in RAM via
+    capture_stdout, ~32KB/s => ~230MB for a 2h movie, doubled by BytesIO
+    copies), this streams ffmpeg's stdout to dest_path in chunks so peak
+    memory stays at ~chunk_size regardless of media length.
+
+    Args:
+        file_path: Path to media file
+        track_index: Index of the audio track to extract
+        dest_path: Destination WAV path (16kHz mono)
+        chunk_size: Read chunk size in bytes
+
+    Returns:
+        dest_path
+
+    Raises:
+        AudioExtractionError: If extraction fails
+    """
+    import ffmpeg
+    import subprocess
+
+    cmd = []
+    try:
+        # Build the ffmpeg command via ffmpeg-python for filter parity with
+        # extract_audio_track, then swap pipe: for the file destination.
+        out = (
+            ffmpeg.input(file_path)
+            .output(
+                dest_path,
+                map=f"0:{track_index}",
+                format="wav",
+                ac=1,  # Mono
+                ar=16000,  # 16kHz for Whisper
+                loglevel="quiet",
+            )
+        )
+        cmd = ffmpeg.compile(out)
+        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        _, stderr = proc.communicate()
+        if proc.returncode != 0:
+            err = stderr.decode() if stderr else f"ffmpeg exited {proc.returncode}"
+            raise AudioExtractionError(f"Failed to extract audio track: {err}")
+        return dest_path
+    except AudioExtractionError:
+        raise
+    except ffmpeg.Error as e:
+        stderr = e.stderr.decode() if e.stderr else str(e)
+        raise AudioExtractionError(f"Failed to extract audio: {stderr}")
+    except Exception as e:
+        raise AudioExtractionError(f"Failed to extract audio track: {e}")
+
+
+def handle_multiple_audio_tracks(
+    file_path: str, preferred_language: Optional[str] = None
+) -> Optional[io.BytesIO]:
+    """
+    Extract audio from a file with multiple tracks into memory.
+
+    Legacy in-memory variant kept for compatibility. New code should use
+    select_audio_track() + extract_audio_track_to_file() which streams to
+    disk and keeps peak RAM constant for long media.
+
+    Args:
+        file_path: Path to media file
+        preferred_language: Preferred language code (e.g., "eng", "jpn")
+
+    Returns:
+        BytesIO with audio data if multiple tracks exist, None otherwise
+    """
+    selected_track = select_audio_track(file_path, preferred_language)
+    if selected_track is None:
+        return None
 
     # Extract audio
     with extract_audio_track(file_path, selected_track.index) as audio_buffer:

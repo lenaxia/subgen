@@ -67,7 +67,11 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         self._last_progress_timestamp: float = 0
         self._progress_timeout_seconds: int = 300  # 5 minutes without progress = stuck
 
-        # Initialize model manager
+        # Initialize model manager. unload_on_idle may be absent on older
+        # config objects / Mocks; coerce non-bool values to the auto default.
+        unload_on_idle = getattr(config.model_lifecycle, "unload_on_idle", None)
+        if not isinstance(unload_on_idle, bool):
+            unload_on_idle = None
         model_config = ModelConfig(
             model_name=config.whisper.model_name,
             model_path=str(config.whisper.model_path),
@@ -77,8 +81,14 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             compute_type=config.whisper.compute_type,
             cleanup_delay=config.model_lifecycle.cleanup_delay,
             clear_vram=config.model_lifecycle.clear_vram_on_complete,
+            unload_on_idle=unload_on_idle,
         )
         self.model_manager = ModelManager(model_config)
+
+        # Drop the engine's model reference whenever the manager unloads the
+        # model, otherwise engine.model pins the unloaded WhisperModel (and
+        # its ctranslate2 runtime state) in memory until the next job.
+        self.model_manager.on_unload = self._on_model_unloaded
 
         # Initialize transcription engine
         self.engine = TranscriptionEngine(config)
@@ -140,6 +150,10 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             f"HealthCheck response: status={status}, memory={memory_mb}MB, uptime={uptime}s"
         )
         return response
+
+    def _on_model_unloaded(self) -> None:
+        """Clear the engine's model reference after model unload."""
+        self.engine.model = None
 
     def _update_progress(self, segments_count: int) -> None:
         """
@@ -455,6 +469,13 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             source_type = "file"
             source = request.file_path
             logger.info(f"Transcribe request received: file_path={request.file_path}")
+
+            # Validate path is non-empty
+            if not request.file_path:
+                logger.error("Transcribe: file_path is empty")
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "file_path must not be empty"
+                )
 
             # Validate file exists
             if not os.path.exists(request.file_path):

@@ -53,6 +53,11 @@ def mock_service():
     service.model_manager = Mock()
     service.model_manager.is_loaded = Mock(return_value=True)
 
+    # Stuck-job detection: without explicit returns, Mock() is truthy and
+    # /ready takes the job_stuck branch with non-serializable Mock values.
+    service._is_job_stuck = Mock(return_value=False)
+    service._progress_timeout_seconds = 300
+
     return service
 
 

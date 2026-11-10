@@ -12,6 +12,9 @@ from unittest.mock import MagicMock
 worker_dir = Path(__file__).parent.parent
 sys.path.insert(0, str(worker_dir / "src"))
 sys.path.insert(0, str(worker_dir))
+# pb/transcription_pb2_grpc.py uses a flat `import transcription_pb2`
+# (matches the container's PYTHONPATH=/app/src:/app:/app/pb)
+sys.path.insert(0, str(worker_dir / "pb"))
 
 
 @pytest.fixture

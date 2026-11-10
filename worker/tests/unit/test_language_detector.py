@@ -98,6 +98,87 @@ class TestDetectLanguageFromFile:
             with pytest.raises(LanguageDetectionError):
                 detect_language_from_file("/test/video.mp4", mock_model)
 
+    def test_detect_language_samples_segment_not_full_file(self):
+        """Regression: detection must decode only the requested sample.
+
+        LEGACY BUG: detect_language_from_file ignored sample_offset and
+        sample_length and called model.transcribe(file_path) on the FULL
+        file, then consumed the entire segments generator — transcribing a
+        whole 2h movie just to read a language code.
+        """
+        import os
+
+        with patch("audio.extractor.extract_audio_segment") as mock_extract:
+            mock_buffer = BytesIO(b"sample_audio")
+            mock_extract.return_value.__enter__ = Mock(return_value=mock_buffer)
+            mock_extract.return_value.__exit__ = Mock(return_value=False)
+
+            consumed = []
+
+            def infinite_segments(*args, **kwargs):
+                # A generator that records consumption; detection must not
+                # iterate it (language is available from info immediately).
+                i = 0
+                while True:
+                    consumed.append(i)
+                    yield Mock(start=float(i), end=float(i + 1), text="x")
+                    i += 1
+
+            mock_info = Mock()
+            mock_info.language = "en"
+            mock_info.language_probability = 0.9
+            mock_model = Mock()
+            mock_model.transcribe = Mock(return_value=(infinite_segments(), mock_info))
+
+            result = detect_language_from_file(
+                "/test/movie.mkv", mock_model, sample_offset=0, sample_length=30
+            )
+
+            assert result.language_code == "en"
+
+            # 1. The extraction must be a 30s sample from offset 0
+            mock_extract.assert_called_once_with("/test/movie.mkv", 0, 30)
+
+            # 2. The model must NOT be given the full file path
+            (transcribe_arg,), _ = mock_model.transcribe.call_args
+            assert transcribe_arg != "/test/movie.mkv"
+
+            # 3. The segments generator must not be consumed
+            assert consumed == [], "detection decoded audio segments unnecessarily"
+
+    def test_detect_language_cleans_up_temp_file(self):
+        """The sampled temp file must be removed after detection."""
+        import os
+        import tempfile
+
+        created = []
+
+        real_named_temp = tempfile.NamedTemporaryFile
+
+        def track_temp(*args, **kwargs):
+            tf = real_named_temp(*args, **kwargs)
+            created.append(tf.name)
+            return tf
+
+        with (
+            patch("audio.extractor.extract_audio_segment") as mock_extract,
+            patch("tempfile.NamedTemporaryFile", side_effect=track_temp),
+        ):
+            mock_buffer = BytesIO(b"sample_audio")
+            mock_extract.return_value.__enter__ = Mock(return_value=mock_buffer)
+            mock_extract.return_value.__exit__ = Mock(return_value=False)
+
+            mock_info = Mock()
+            mock_info.language = "en"
+            mock_info.language_probability = 0.9
+            mock_model = Mock()
+            mock_model.transcribe = Mock(return_value=(iter([]), mock_info))
+
+            detect_language_from_file("/test/movie.mkv", mock_model)
+
+        for path in created:
+            assert not os.path.exists(path), f"temp file leaked: {path}"
+
 
 @pytest.mark.skipif(not LANGUAGE_MODULE_EXISTS, reason="Language module not yet implemented")
 class TestDetectLanguageFromBytes:
@@ -108,21 +189,27 @@ class TestDetectLanguageFromBytes:
         audio_bytes = b"fake_audio_data"
 
         mock_model = Mock()
-        mock_result = Mock()
-        mock_result.language = "Japanese"
-        mock_model.transcribe = Mock(return_value=mock_result)
+        mock_info = Mock()
+        mock_info.language = "ja"
+        mock_info.language_probability = 0.95
+        mock_model.transcribe = Mock(return_value=(iter([]), mock_info))
 
         with patch("language.detector.LanguageCode") as mock_lang_code:
             mock_lang = Mock()
             mock_lang.to_iso_639_1 = Mock(return_value="ja")
             mock_lang.to_name = Mock(return_value="Japanese")
-            mock_lang_code.from_name = Mock(return_value=mock_lang)
+            mock_lang_code.from_iso_639_1 = Mock(return_value=mock_lang)
 
             result = detect_language_from_bytes(audio_bytes, mock_model)
 
             assert result.language_code == "ja"
             assert result.language_name == "Japanese"
-            mock_model.transcribe.assert_called_once_with(audio_bytes)
+            # Bytes are written to a temp file (faster-whisper needs a
+            # path/file-like input), so transcribe gets a path, not bytes.
+            mock_model.transcribe.assert_called_once()
+            transcribe_arg = mock_model.transcribe.call_args[0][0]
+            assert isinstance(transcribe_arg, str)
+            assert transcribe_arg != audio_bytes
 
     def test_detect_language_from_bytes_error(self):
         """Test error handling in bytes detection."""

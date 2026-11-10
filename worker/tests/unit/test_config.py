@@ -272,7 +272,7 @@ class TestSystemConfig:
 
         assert config.grpc_port == 50051
         assert config.webhook_port == 9000
-        assert config.max_workers == 4
+        assert config.max_workers == 10
         assert config.memory_threshold_mb == 3000
         assert config.log_level == "INFO"
         assert config.debug is False

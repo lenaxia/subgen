@@ -16,7 +16,11 @@ torchaudio==2.10.0+cpu
 
 # Audio processing
 ffmpeg-python==0.2.0
-# av will be installed automatically by faster-whisper
+# PyAV: faster-whisper 1.2.1 calls av.open(..., metadata_errors="ignore"),
+# which was removed in PyAV 16+. Unpinned installs resolve av 19.x and EVERY
+# transcription fails with "open() got an unexpected keyword argument
+# 'metadata_errors'". Pin to the last compatible major (verified 15.1.0).
+av==15.1.0
 
 # Configuration
 pydantic==2.5.3

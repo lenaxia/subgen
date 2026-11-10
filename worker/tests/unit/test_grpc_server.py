@@ -48,8 +48,19 @@ def mock_config():
 
 @pytest.fixture
 def servicer(mock_config):
-    """Create TranscriptionServicer instance for testing."""
-    return TranscriptionServicer(mock_config)
+    """Create TranscriptionServicer instance for testing.
+
+    The model manager is replaced with a Mock so unit tests never trigger
+    real Whisper model downloads (previously pulled ~75MB-1.5GB from
+    HuggingFace mid-suite).
+    """
+    mock_config.model_lifecycle.unload_on_idle = None
+    svc = TranscriptionServicer(mock_config)
+    svc.model_manager = Mock()
+    svc.model_manager.load.return_value = Mock()
+    svc.model_manager.is_loaded.return_value = False
+    svc.model_manager.schedule_cleanup.return_value = None
+    return svc
 
 
 @pytest.fixture

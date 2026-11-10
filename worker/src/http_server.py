@@ -59,6 +59,7 @@ def init_health_server(service: "TranscriptionService"):
 
 
 @app.route("/healthz", methods=["GET"])
+@app.route("/health", methods=["GET"])
 def healthz():
     """
     Liveness probe - is the worker alive?
@@ -73,6 +74,7 @@ def healthz():
 
 
 @app.route("/readyz", methods=["GET"])
+@app.route("/ready", methods=["GET"])
 def readyz():
     """
     Readiness probe - can the worker accept new tasks?

@@ -100,7 +100,7 @@ class TestTranscribeVideoFile:
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_srt", return_value=1),
             patch(
                 "transcription.engine.generate_subtitle_path", return_value="/test/video.eng.srt"
@@ -129,7 +129,7 @@ class TestTranscribeVideoFile:
         """Engine unpacks (generator, info) from model.transcribe() correctly."""
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_srt", return_value=0),
             patch("transcription.engine.generate_subtitle_path", return_value="/test/v.srt"),
             patch("os.path.exists", return_value=True),
@@ -194,7 +194,7 @@ class TestTranscribeVideoFile:
         """Test transcription with forced language passes it to model."""
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_srt", return_value=0),
             patch(
                 "transcription.engine.generate_subtitle_path", return_value="/test/video.jpn.srt"
@@ -226,7 +226,7 @@ class TestTranscribeVideoFile:
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_srt", side_effect=capture_write_srt),
             patch("transcription.engine.generate_subtitle_path", return_value="/t.srt"),
             patch("os.path.exists", return_value=True),
@@ -252,9 +252,7 @@ class TestTranscribeVideoFile:
         """Multi-track extraction appends to temp_files, not reassigns."""
         import tempfile
 
-        extracted_audio = Mock()
-        extracted_audio.read = Mock(return_value=b"audio_data")
-        extracted_audio.close = Mock()
+        selected_track = Mock(index=1)
 
         created_temps = []
 
@@ -267,8 +265,10 @@ class TestTranscribeVideoFile:
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
+            patch("transcription.engine.select_audio_track", return_value=selected_track),
             patch(
-                "transcription.engine.handle_multiple_audio_tracks", return_value=extracted_audio
+                "transcription.engine.extract_audio_track_to_file",
+                side_effect=lambda fp, idx, dest: dest,
             ),
             patch("transcription.engine.write_srt", return_value=0),
             patch("transcription.engine.generate_subtitle_path", return_value="/test/video.srt"),
@@ -298,7 +298,7 @@ class TestTranscribeAudioFile:
         """Test audio file generates LRC file."""
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_lrc", return_value=0),
             patch("os.path.exists", return_value=True),
             patch("os.path.splitext", return_value=("/test/audio", ".mp3")),
@@ -325,7 +325,7 @@ class TestTranscribeAudioFile:
         for ext in audio_extensions:
             with (
                 patch("transcription.engine.has_audio", return_value=True),
-                patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+                patch("transcription.engine.select_audio_track", return_value=None),
                 patch("transcription.engine.write_lrc", return_value=0),
                 patch("os.path.exists", return_value=True),
                 patch("os.path.splitext", return_value=(f"/test/audio", ext)),
@@ -354,7 +354,7 @@ class TestTranscribeAudioFile:
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_lrc", side_effect=capture_write_lrc),
             patch("os.path.exists", return_value=True),
             patch("os.path.splitext", return_value=("/test/audio", ".mp3")),
@@ -384,7 +384,7 @@ class TestTranscribeOptions:
 
         with (
             patch("transcription.engine.has_audio", return_value=True),
-            patch("transcription.engine.handle_multiple_audio_tracks", return_value=None),
+            patch("transcription.engine.select_audio_track", return_value=None),
             patch("transcription.engine.write_srt", return_value=0) as mock_write_srt,
             patch("transcription.engine.generate_subtitle_path", return_value="/test/video.srt"),
             patch("os.path.exists", return_value=True),
