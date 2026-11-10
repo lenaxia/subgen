@@ -6,7 +6,7 @@ These tests will fail initially and pass once implementation is complete.
 """
 
 import time
-from unittest.mock import Mock, patch
+from unittest.mock import Mock, MagicMock, patch
 
 import grpc
 import pytest
@@ -42,14 +42,35 @@ def mock_config():
     # Transcription config
     config.transcription = Mock()
     config.transcription.task = "transcribe"
+    config.transcription.custom_regroup = "cm_sl=84_sl=42++++++1"
+    config.transcription.use_model_prompt = False
+    config.transcription.custom_model_prompt = ""
 
     return config
 
 
 @pytest.fixture
 def servicer(mock_config):
-    """Create TranscriptionServicer instance for testing."""
-    return TranscriptionServicer(mock_config)
+    """Create TranscriptionServicer instance for testing.
+
+    The model manager is replaced with a Mock so unit tests never trigger
+    real Whisper model downloads (previously pulled ~75MB-1.5GB from
+    HuggingFace mid-suite).
+    """
+    mock_config.model_lifecycle.unload_on_idle = None
+    svc = TranscriptionServicer(mock_config)
+    # MagicMock (not Mock): the service uses `with model_manager.lock():`
+    # around engine.model assignments, which requires the context-manager
+    # protocol plain Mock does not implement.
+    svc.model_manager = MagicMock()
+    svc.model_manager.load.return_value = Mock()
+    svc.model_manager.is_loaded.return_value = False
+    svc.model_manager.schedule_cleanup.return_value = None
+    # Multi-language fallback reads these; bare Mocks are not iterable
+    mock_config.skip.get_target_languages.return_value = []
+    mock_config.skip.get_preferred_audio_languages.return_value = []
+    mock_config.skip.transcribe_preferred = False
+    return svc
 
 
 @pytest.fixture
@@ -162,10 +183,23 @@ def test_detect_language_uses_default_sample_length(servicer, mock_context):
     """Test DetectLanguage uses default sample length if not specified."""
     request = transcription_pb2.DetectLanguageRequest(file_path="/test/audio.mp3")
 
+    # Protobuf default is 0; the RPC must clamp it to 30s before the engine
+    # sees it (a 0-second sample would detect nothing).
+    captured = {}
+
+    def fake_detect(source, sample_length, sample_offset):
+        captured["sample_length"] = sample_length
+        result = Mock()
+        result.language_code = "en"
+        result.language_name = "English"
+        result.confidence = 0.9
+        return result
+
+    servicer.engine.detect_language = fake_detect
     response = servicer.DetectLanguage(request, mock_context)
 
-    # Should not crash with missing sample_length
     assert response is not None
+    assert captured["sample_length"] == 30
 
 
 def test_detect_language_handles_file_not_found(servicer, mock_context):
@@ -311,3 +345,143 @@ def test_servicer_has_all_required_methods(mock_config):
     assert callable(servicer.HealthCheck)
     assert callable(servicer.DetectLanguage)
     assert callable(servicer.Transcribe)
+
+
+# ============================================================================
+# Model Unload Callback Wiring Tests
+# ============================================================================
+
+
+@patch("transcription.model_manager.stable_whisper")
+def test_on_unload_callback_registered_on_real_manager(mock_whisper, mock_config):
+    """Regression (review F2/claim 7): the servicer must register _on_model_unloaded
+    on the REAL model manager (the shared fixture swaps it for a Mock, which never
+    exercised the wiring)."""
+    svc = TranscriptionServicer(mock_config)
+    # Bound methods: use == (each attribute access creates a new object)
+    assert svc.model_manager.on_unload == svc._on_model_unloaded
+
+
+def test_on_model_unloaded_clears_engine_reference(servicer):
+    """_on_model_unloaded clears engine.model when the manager has unloaded."""
+    servicer.engine.model = Mock()
+    servicer.model_manager.is_loaded.return_value = False
+    servicer._on_model_unloaded()
+    assert servicer.engine.model is None
+
+
+def test_on_model_unloaded_race_guard_keeps_fresh_model(servicer):
+    """Regression (review F2): unload fires its callback AFTER a seconds-wide
+    heavy phase (gc.collect). If a new job loaded a fresh model in that window,
+    the callback must NOT null out engine.model — that fails the in-flight job
+    with 'Model not loaded'."""
+    fresh_model = Mock()
+    servicer.engine.model = fresh_model
+    servicer.model_manager.is_loaded.return_value = True  # fresh reload happened
+    servicer._on_model_unloaded()
+    assert servicer.engine.model is fresh_model
+
+
+# ============================================================================
+# Prompt / Regroup Config Wiring Tests
+# ============================================================================
+
+
+def test_options_use_config_regroup_default(servicer):
+    """CUSTOM_REGROUP config becomes the default TranscribeOptions value;
+    a request override still wins."""
+    assert servicer.config.transcription.custom_regroup == "cm_sl=84_sl=42++++++1"
+
+
+def test_config_prompt_applied_when_gated_on(servicer):
+    """USE_MODEL_PROMPT=true + CUSTOM_MODEL_PROMPT set → default initial_prompt."""
+    servicer.config.transcription.use_model_prompt = True
+    servicer.config.transcription.custom_model_prompt = "Professionally transcribed."
+
+    request = transcription_pb2.TranscribeRequest(
+        file_path="/test/audio.mp3", options=transcription_pb2.TranscribeOptions()
+    )
+    servicer.engine.detect_language = Mock(return_value=Mock(language_code="en"))
+    servicer.engine.transcribe = Mock(return_value=Mock(
+        success=True,
+        subtitle_path="/test/audio.srt",
+        detected_language="en",
+        duration_seconds=1.0,
+        segment_count=1,
+        transcription_time_ms=1000,
+        peak_memory_mb=123,
+        segments=None,
+        error_message="",
+    ))
+    skip_ok = Mock(should_skip=False, reason=None, details="")
+    servicer.skip_checker.check = Mock(return_value=skip_ok)
+
+    with patch("os.path.exists", return_value=True):
+        response = servicer.Transcribe(request, mock_context)
+
+    assert response.success is True
+    options_sent = servicer.engine.transcribe.call_args.kwargs["options"]
+    assert options_sent.custom_prompt == "Professionally transcribed."
+
+
+def test_request_custom_prompt_overrides_config(servicer):
+    """A per-request custom_prompt wins over the config default."""
+    servicer.config.transcription.use_model_prompt = True
+    servicer.config.transcription.custom_model_prompt = "config default prompt"
+
+    request = transcription_pb2.TranscribeRequest(
+        file_path="/test/audio.mp3",
+        options=transcription_pb2.TranscribeOptions(custom_prompt="request prompt"),
+    )
+    servicer.engine.detect_language = Mock(return_value=Mock(language_code="en"))
+    servicer.engine.transcribe = Mock(return_value=Mock(
+        success=True,
+        subtitle_path="/test/audio.srt",
+        detected_language="en",
+        duration_seconds=1.0,
+        segment_count=1,
+        transcription_time_ms=1000,
+        peak_memory_mb=123,
+        segments=None,
+        error_message="",
+    ))
+    skip_ok = Mock(should_skip=False, reason=None, details="")
+    servicer.skip_checker.check = Mock(return_value=skip_ok)
+
+    with patch("os.path.exists", return_value=True):
+        response = servicer.Transcribe(request, mock_context)
+
+    assert response.success is True
+    options_sent = servicer.engine.transcribe.call_args.kwargs["options"]
+    assert options_sent.custom_prompt == "request prompt"
+
+
+def test_no_prompt_when_gated_off(servicer):
+    """USE_MODEL_PROMPT=false → no initial_prompt even with CUSTOM_MODEL_PROMPT set."""
+    servicer.config.transcription.use_model_prompt = False
+    servicer.config.transcription.custom_model_prompt = "should not apply"
+
+    request = transcription_pb2.TranscribeRequest(
+        file_path="/test/audio.mp3", options=transcription_pb2.TranscribeOptions()
+    )
+    servicer.engine.detect_language = Mock(return_value=Mock(language_code="en"))
+    servicer.engine.transcribe = Mock(return_value=Mock(
+        success=True,
+        subtitle_path="/test/audio.srt",
+        detected_language="en",
+        duration_seconds=1.0,
+        segment_count=1,
+        transcription_time_ms=1000,
+        peak_memory_mb=123,
+        segments=None,
+        error_message="",
+    ))
+    skip_ok = Mock(should_skip=False, reason=None, details="")
+    servicer.skip_checker.check = Mock(return_value=skip_ok)
+
+    with patch("os.path.exists", return_value=True):
+        response = servicer.Transcribe(request, mock_context)
+
+    assert response.success is True
+    options_sent = servicer.engine.transcribe.call_args.kwargs["options"]
+    assert not options_sent.custom_prompt

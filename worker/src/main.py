@@ -31,7 +31,7 @@ def serve() -> NoReturn:
     config = get_settings()
 
     # Setup logging
-    setup_logging(config.system.debug)
+    setup_logging(config.system.debug, config.system.log_format)
 
     logger.info("Starting Python transcription worker")
     logger.info(f"gRPC server will listen on 0.0.0.0:{config.system.grpc_port}")

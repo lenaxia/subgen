@@ -8,21 +8,29 @@ import sys
 from typing import Any
 
 
-def setup_logging(debug: bool = False) -> None:
+def setup_logging(debug: bool = False, log_format: str = "json") -> None:
     """
     Setup structured logging for the worker.
 
     Args:
         debug: Enable debug logging if True
+        log_format: Console output format, "json" (default, one JSON object
+            per line) or "text" (human-readable)
     """
     log_level = logging.DEBUG if debug else logging.INFO
 
     # Create formatter
-    formatter = logging.Formatter(
-        fmt='{"timestamp": "%(asctime)s", "level": "%(levelname)s", '
-        '"logger": "%(name)s", "message": "%(message)s"}',
-        datefmt="%Y-%m-%dT%H:%M:%S%z",
-    )
+    if log_format == "text":
+        formatter = logging.Formatter(
+            fmt="%(asctime)s %(levelname)s %(name)s: %(message)s",
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
+    else:
+        formatter = logging.Formatter(
+            fmt='{"timestamp": "%(asctime)s", "level": "%(levelname)s", '
+            '"logger": "%(name)s", "message": "%(message)s"}',
+            datefmt="%Y-%m-%dT%H:%M:%S%z",
+        )
 
     # Configure root logger
     root_logger = logging.getLogger()

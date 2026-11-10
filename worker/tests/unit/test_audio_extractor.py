@@ -4,6 +4,8 @@ Unit tests for audio extraction module.
 Tests extracted logic from subgen.py:1318-1350, 1352-1386, 1446-1490, 2016-2038
 """
 
+import shutil
+import subprocess
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from io import BytesIO
@@ -393,3 +395,131 @@ class TestAudioTrackInfo:
         track = AudioTrackInfo(index=1, codec="ac3", channels=6, language="jpn", is_default=False)
 
         assert track.title is None
+
+
+class TestExtractAudioTrackToFile:
+    """Tests for the disk-streaming track extraction (PR review coverage gap).
+
+    extract_audio_track_to_file is the production path for multi-track media;
+    previously it had NO direct unit tests (only the happy-path engine test).
+    """
+
+    def _mock_ffmpeg_cmd(self):
+        """Patch ffmpeg.input/.output/.compile to yield a dummy argv."""
+        return (
+            patch("ffmpeg.input"),
+            patch("ffmpeg.output"),
+            patch("ffmpeg.compile", return_value=["ffmpeg", "-i", "in", "out.wav"]),
+        )
+
+    def test_success_returns_dest_path(self):
+        """Zero returncode returns the destination path."""
+        p1, p2, p3 = self._mock_ffmpeg_cmd()
+        with p1, p2, p3, patch("subprocess.Popen") as mock_popen:
+            proc = Mock()
+            proc.returncode = 0
+            proc.communicate.return_value = (b"", b"")
+            mock_popen.return_value = proc
+            from audio.extractor import extract_audio_track_to_file
+
+            result = extract_audio_track_to_file("/test/video.mkv", 1, "/tmp/out.wav")
+        assert result == "/tmp/out.wav"
+        # stdout must go to DEVNULL (writing it to a pipe we never read can
+        # deadlock on large outputs)
+        _, kwargs = mock_popen.call_args
+        assert kwargs.get("stdout") == subprocess.DEVNULL
+        assert kwargs.get("stderr") == subprocess.PIPE
+
+    def test_nonzero_returncode_raises_with_stderr(self):
+        """Nonzero ffmpeg exit raises AudioExtractionError carrying stderr."""
+        p1, p2, p3 = self._mock_ffmpeg_cmd()
+        with p1, p2, p3, patch("subprocess.Popen") as mock_popen:
+            proc = Mock()
+            proc.returncode = 1
+            proc.communicate.return_value = (b"", b"Stream map '0:9' matches no streams")
+            mock_popen.return_value = proc
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="matches no streams"):
+                extract_audio_track_to_file("/test/video.mkv", 9, "/tmp/out.wav")
+
+    def test_ffmpeg_error_wrapped(self):
+        """ffmpeg.Error (e.g. from compile) is wrapped as AudioExtractionError."""
+        import ffmpeg as real_ffmpeg
+
+        with patch("ffmpeg.input") as mock_input:
+            mock_input.side_effect = real_ffmpeg.Error("bad input", b"", b"kaput")
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="kaput"):
+                extract_audio_track_to_file("/test/video.mkv", 0, "/tmp/out.wav")
+
+    def test_generic_exception_wrapped(self):
+        """Unexpected exceptions (e.g. missing file) become AudioExtractionError."""
+        with patch("ffmpeg.input", side_effect=FileNotFoundError("no such file")):
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="no such file"):
+                extract_audio_track_to_file("/nonexistent.mkv", 0, "/tmp/out.wav")
+
+
+class TestExtractAudioTrackToFileIntegration:
+    """Real-ffmpeg integration tests (skipped when ffmpeg is unavailable).
+
+    Regression (PR #4 skeptical review, BLOCKER): the engine pre-creates the
+    destination via NamedTemporaryFile(delete=False), and this extractor ran
+    ffmpeg WITHOUT -y — ffmpeg showed the interactive "File already exists.
+    Overwrite? [y/N]" prompt, read EOF, and exited 1, failing EVERY
+    multi-track transcription. The unit tests all patch the extractor, so
+    only a real-ffmpeg run against a pre-created destination catches it.
+    """
+
+    @pytest.fixture
+    def two_track_mkv(self, tmp_path):
+        """A 1s MKV with two audio tracks (440Hz + 880Hz tones)."""
+        if shutil.which("ffmpeg") is None:
+            pytest.skip("system ffmpeg not available")
+        src = tmp_path / "two_track.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-nostdin",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=880:duration=1",
+                "-map", "0:a",
+                "-map", "1:a",
+                "-c:a", "aac",
+                str(src),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        assert src.exists() and src.stat().st_size > 0
+        return str(src)
+
+    def test_extraction_overwrites_precreated_dest(self, two_track_mkv, tmp_path):
+        """Extraction onto an ALREADY-EXISTING destination must succeed.
+
+        This is the exact engine call shape: NamedTemporaryFile creates the
+        file first, then extraction writes over it. Without -y this fails.
+        """
+        from audio.extractor import extract_audio_track_to_file
+
+        dest = tmp_path / "precreated.wav"
+        dest.write_bytes(b"\x00" * 16)  # simulates NamedTemporaryFile's empty file
+        result = extract_audio_track_to_file(two_track_mkv, 0, str(dest))
+        assert result == str(dest)
+        data = dest.read_bytes()
+        assert data[:4] == b"RIFF", "destination was not overwritten with a real WAV"
+        assert len(data) > 44, "WAV has no samples"
+
+    def test_second_track_selection(self, two_track_mkv, tmp_path):
+        """Track index is honored (map 0:<index>) on a fresh destination."""
+        from audio.extractor import extract_audio_track_to_file
+
+        dest = tmp_path / "track1.wav"
+        extract_audio_track_to_file(two_track_mkv, 1, str(dest))
+        data = dest.read_bytes()
+        assert data[:4] == b"RIFF"
+        assert dest.stat().st_size > 44

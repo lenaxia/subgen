@@ -19,11 +19,14 @@ from unittest.mock import Mock, patch, MagicMock
 
 import pytest
 
-# Mock modules before importing our code
-sys.modules["stable_whisper"] = MagicMock()
-sys.modules["torch"] = MagicMock()
-sys.modules["ffmpeg"] = MagicMock()
-sys.modules["av"] = MagicMock()
+# Mock heavy ML modules ONLY when they are not installed. Poisoning
+# sys.modules unconditionally breaks other test files that lazily import
+# the real modules at runtime (e.g. audio.extractor's `import av`).
+for _mod in ("stable_whisper", "torch", "ffmpeg", "av"):
+    try:
+        __import__(_mod)
+    except ImportError:
+        sys.modules[_mod] = MagicMock()
 
 from transcription.model_manager import ModelManager, ModelConfig
 from audio.extractor import extract_audio_segment, extract_audio_track, AudioExtractionError
@@ -34,7 +37,7 @@ class TestTimerThreadLeak:
 
     def test_timer_cleanup_no_accumulation(self):
         """Verify cancelled timers don't accumulate threads."""
-        config = ModelConfig(cleanup_delay=10)
+        config = ModelConfig(cleanup_delay=10, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Get initial thread count
@@ -67,7 +70,7 @@ class TestTimerThreadLeak:
     @pytest.mark.stress
     def test_timer_stress_500_cycles(self):
         """Stress test: 500 schedule/cancel cycles should not leak threads."""
-        config = ModelConfig(cleanup_delay=5)
+        config = ModelConfig(cleanup_delay=5, unload_on_idle=True)
         manager = ModelManager(config)
 
         initial_threads = threading.active_count()
@@ -94,7 +97,7 @@ class TestTimerThreadLeak:
 
     def test_cleanup_timer_properly_cancelled(self):
         """Test that cleanup timer is properly cancelled."""
-        config = ModelConfig(cleanup_delay=1)
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Schedule cleanup
@@ -314,7 +317,7 @@ class TestStressTests:
 
     def test_concurrent_operations_no_deadlock(self):
         """Test concurrent operations don't deadlock or leak."""
-        config = ModelConfig(cleanup_delay=1)
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
         manager = ModelManager(config)
 
         # Spawn multiple threads doing schedule/cancel
@@ -338,6 +341,92 @@ class TestStressTests:
 
 class TestMemoryLeakDocumentation:
     """Tests that document the memory leak fixes."""
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_context_manager_no_deadlock(self, mock_whisper):
+        """Regression: __exit__ must not deadlock.
+
+        LEGACY BUG: ModelManager used threading.Lock (non-reentrant) and
+        __exit__ called self.unload() while still holding self._lock,
+        deadlocking the thread forever (reproduced: faulthandler showed
+        unload blocked on `with self._lock` at model_manager.py:183).
+
+        stable_whisper is patched so the timing stays deterministic: a
+        real load_faster_whisper call takes 10s+ (or downloads 1.5GB on
+        a cold cache), which trips the 10s join timeout below and reads
+        as a false deadlock.
+        """
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        result = {}
+
+        def run():
+            with manager:
+                result["loaded"] = manager.is_loaded()
+            result["done"] = True
+
+        t = threading.Thread(target=run, daemon=True)
+        t.start()
+        t.join(timeout=10)
+        assert not t.is_alive(), "ModelManager context manager deadlocked"
+        assert result.get("done") is True
+        assert not manager.is_loaded()
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_unload_invokes_on_unload_callback(self, mock_whisper):
+        """unload() must notify owners so stale references are dropped.
+
+        LEGACY BUG: TranscriptionServicer set engine.model = model but never
+        cleared it on unload; the engine kept the unloaded WhisperModel
+        (and its ctranslate2 runtime state) pinned until the next job.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        called = []
+        manager.on_unload = lambda: called.append(True)
+        manager.load()
+        manager.unload()
+        assert called == [True]
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_schedule_cleanup_noop_on_cpu(self, mock_whisper):
+        """Idle unload must be skipped on CPU by default.
+
+        LEGACY BUG: clear_vram_on_complete=true (default) unloaded the model
+        after every job even on CPU. Repeated load->transcribe->unload cycles
+        fragment the native heap: measured +20-30MB RSS per cycle, +200MB
+        over 10 job cycles with the tiny model (worse with medium). Keeping
+        the model resident on CPU keeps RSS flat.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(device="cpu", cleanup_delay=1)
+        manager = ModelManager(config)
+        manager.load()
+        manager.schedule_cleanup(delay=0.1)
+        assert manager._cleanup_timer is None  # no timer scheduled on CPU
+        time.sleep(0.3)
+        assert manager.is_loaded()  # model stays resident
+
+    def test_schedule_cleanup_active_on_cuda(self):
+        """Idle unload still applies on CUDA (frees VRAM)."""
+        config = ModelConfig(device="cuda", cleanup_delay=1)
+        manager = ModelManager(config)
+        manager.schedule_cleanup(delay=5)
+        assert manager._cleanup_timer is not None
+        manager.cancel_cleanup()
+
+    def test_schedule_cleanup_forced_on_cpu(self):
+        """unload_on_idle=True forces CPU unloads (opt-in for sparse jobs)."""
+        config = ModelConfig(device="cpu", cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.schedule_cleanup(delay=5)
+        assert manager._cleanup_timer is not None
+        manager.cancel_cleanup()
 
     def test_leak_1_timer_thread_documented(self):
         """
@@ -412,3 +501,208 @@ class TestMemoryLeakDocumentation:
         - test_timer_cleanup_no_accumulation
         """
         assert True  # Documentation test
+
+
+class TestLockDiscipline:
+    """Regression tests for the unload lock discipline (PR review findings).
+
+    LEGACY BUGS:
+    - unload() ran gc.collect + malloc_trim while holding self._lock, so
+      HealthCheck / is_loaded() blocked for the full (13s+ measured) cleanup.
+    - unload() could destroy a model a concurrent __enter__ had just loaded
+      (TOCTOU between __exit__'s depth decision and the teardown).
+    - A failed __enter__ load leaked the depth increment, suppressing every
+      subsequent unload.
+    """
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_heavy_cleanup_does_not_block_other_threads(self, mock_whisper):
+        """Other threads must not block on the lock while gc.collect runs.
+
+        The heavy phase (gc + malloc_trim) runs OUTSIDE the lock: while it
+        sleeps, another thread's is_loaded() must return promptly. With the
+        pre-fix code (heavy phase under the lock) this test fails: the
+        is_loaded() call blocks for the full gc duration.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+        manager.load()
+
+        gc_entered = threading.Event()
+        real_collect = gc.collect
+
+        def slow_collect():
+            gc_entered.set()
+            time.sleep(1.0)
+            return 0
+
+        def unloader():
+            with patch("gc.collect", side_effect=slow_collect):
+                manager.unload()
+
+        t = threading.Thread(target=unloader, daemon=True)
+        t.start()
+        assert gc_entered.wait(timeout=5), "unload never reached the gc phase"
+
+        start = time.time()
+        loaded = manager.is_loaded()  # must not wait on the sleeping gc
+        elapsed = time.time() - start
+
+        t.join(timeout=10)
+        assert elapsed < 0.5, f"is_loaded() blocked {elapsed:.2f}s during unload's gc phase"
+        assert loaded is False
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_unload_deferred_while_context_active(self, mock_whisper):
+        """TOCTOU guard: unload() must not destroy a model inside an active
+        `with manager:` context — the context exit owns the unload."""
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        manager.__enter__()
+        # Timer-style direct unload while the context is active
+        manager.unload()
+        assert manager.is_loaded(), "unload() destroyed the model while a context held it"
+
+        manager.__exit__(None, None, None)
+        assert not manager.is_loaded(), "outermost context exit did not unload"
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_failed_load_does_not_leak_context_depth(self, mock_whisper):
+        """A failed __enter__ load must unwind the depth increment.
+
+        LEGACY BUG: __enter__ incremented _context_depth before load(); when
+        load raised, __exit__ never ran, the depth stayed >0 forever, and
+        unload() was suppressed for the lifetime of the manager.
+        """
+        mock_whisper.load_faster_whisper.side_effect = RuntimeError("boom")
+        manager = ModelManager(ModelConfig(cleanup_delay=1, unload_on_idle=True))
+        manager.on_unload = None
+
+        with pytest.raises(RuntimeError):
+            manager.__enter__()
+        assert manager._context_depth == 0, "failed load leaked the depth increment"
+
+        # A later unload must not be suppressed by a leaked depth
+        mock_whisper.load_faster_whisper.side_effect = None
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        manager.load()
+        manager.unload()
+        assert not manager.is_loaded()
+
+
+class TestCleanupTimerSafety:
+    """Regression tests for cleanup-timer races (follow-up review findings).
+
+    LEGACY BUGS:
+    - _perform_cleanup nulled self._cleanup_timer unconditionally, so a
+      schedule_cleanup() during its unload lost the NEW timer's reference
+      (uncancellable zombie timer).
+    - A timer scheduled for job N could fire while job N+1 was loading or
+      transcribing and unload the model out from under it (no staleness
+      check), and load() never cancelled a stale pending timer.
+    """
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_schedule_during_unload_preserves_new_timer(self, mock_whisper):
+        """A schedule_cleanup() during a long unload must survive it."""
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+        manager.load()
+
+        unload_started = threading.Event()
+        release_unload = threading.Event()
+        real_collect = gc.collect
+
+        def slow_collect():
+            unload_started.set()
+            release_unload.wait(timeout=5)
+            return 0
+
+        def unloader():
+            with patch("gc.collect", side_effect=slow_collect):
+                manager.unload()
+
+        t = threading.Thread(target=unloader, daemon=True)
+        t.start()
+        assert unload_started.wait(timeout=5)
+
+        # While unload's heavy phase is blocked, schedule a new cleanup
+        manager.schedule_cleanup(delay=0.1)
+        new_timer = manager._cleanup_timer
+        assert new_timer is not None
+
+        release_unload.set()
+        t.join(timeout=10)
+
+        # The old cleanup must NOT have clobbered the new timer's reference
+        assert manager._cleanup_timer is new_timer, "new timer reference was lost"
+
+        # The new timer fires (0.1s) and completes: ref cleared, model stays
+        # unloaded. Note the model was already unloaded by the FIRST unload
+        # (ref cleared before the heavy phase) — the new timer's unload is
+        # then a no-op that still releases its own reference.
+        deadline = time.time() + 5
+        while manager._cleanup_timer is not None and time.time() < deadline:
+            time.sleep(0.05)
+        assert manager._cleanup_timer is None, "new timer never released its reference"
+        assert not manager.is_loaded()
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_stale_timer_does_not_unload_newer_load(self, mock_whisper):
+        """A timer scheduled for job N must not unload job N+1's model.
+
+        Reproduces the CUDA mid-transcription unload: idle timer armed, the
+        next job loads (generation bump + cancel), but the timer already
+        fired and is heading into unload — the generation check must skip it.
+        """
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        # Arm a cleanup with a generous delay, then simulate the next job:
+        # the load call must cancel the pending timer and bump the generation.
+        manager.load()
+        manager.schedule_cleanup(delay=5)
+        timer = manager._cleanup_timer
+        assert timer is not None
+
+        # Simulate a timer that already fired and passed the event check,
+        # i.e. _perform_cleanup is about to run with the OLD generation.
+        old_generation = manager._load_generation
+        manager.load()  # next job: generation bumps, pending timer cancelled
+        assert manager._load_generation == old_generation + 1
+
+        # Fire the stale cleanup exactly as the old timer would have
+        manager._perform_cleanup(timer, old_generation)
+
+        assert manager.is_loaded(), "stale timer unloaded the newer job's model"
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_load_cancels_pending_idle_timer(self, mock_whisper):
+        """load() must cancel a pending idle timer (it would fire mid-job)."""
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        manager.load()
+        manager.schedule_cleanup(delay=60)
+        assert manager._cleanup_timer is not None
+
+        manager.load()  # next job starts
+        assert manager._cleanup_timer is None, "load left a pending idle timer armed"
+
+        # ...and the timer must genuinely not fire later
+        time.sleep(0.2)
+        assert manager.is_loaded()

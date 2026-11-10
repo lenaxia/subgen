@@ -16,9 +16,14 @@ from pathlib import Path
 # Add src to path
 sys.path.insert(0, str(Path(__file__).parent.parent.parent / "src"))
 
-# Mock dependencies before importing
-sys.modules["stable_whisper"] = MagicMock()
-sys.modules["torch"] = MagicMock()
+# Mock heavy ML dependencies ONLY when not installed (unconditional
+# sys.modules poisoning breaks other tests that lazily import the real
+# modules at runtime).
+for _mod in ("stable_whisper", "torch"):
+    try:
+        __import__(_mod)
+    except ImportError:
+        sys.modules[_mod] = MagicMock()
 
 from transcription.model_manager import ModelManager, ModelConfig
 
@@ -35,6 +40,9 @@ def config():
         compute_type="auto",
         cleanup_delay=1,  # Short delay for tests
         clear_vram=True,
+        # Test the timer mechanics explicitly: on CPU the auto policy
+        # (unload_on_idle=None) never schedules a cleanup.
+        unload_on_idle=True,
     )
 
 

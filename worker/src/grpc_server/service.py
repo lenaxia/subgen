@@ -67,7 +67,18 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         self._last_progress_timestamp: float = 0
         self._progress_timeout_seconds: int = 300  # 5 minutes without progress = stuck
 
-        # Initialize model manager
+        # Initialize model manager. unload_on_idle may be absent on older
+        # config objects / Mocks (getattr default); a present-but-non-bool
+        # value is loudly warned about and coerced to auto rather than
+        # silently ignored.
+        unload_on_idle = getattr(config.model_lifecycle, "unload_on_idle", None)
+        if not isinstance(unload_on_idle, bool):
+            logger.warning(
+                "model_lifecycle.unload_on_idle=%r is not a bool; "
+                "coercing to auto (None = unload on CUDA only)",
+                unload_on_idle,
+            )
+            unload_on_idle = None
         model_config = ModelConfig(
             model_name=config.whisper.model_name,
             model_path=str(config.whisper.model_path),
@@ -77,11 +88,19 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             compute_type=config.whisper.compute_type,
             cleanup_delay=config.model_lifecycle.cleanup_delay,
             clear_vram=config.model_lifecycle.clear_vram_on_complete,
+            unload_on_idle=unload_on_idle,
         )
         self.model_manager = ModelManager(model_config)
 
         # Initialize transcription engine
         self.engine = TranscriptionEngine(config)
+
+        # Drop the engine's model reference whenever the manager unloads the
+        # model, otherwise engine.model pins the unloaded WhisperModel (and
+        # its ctranslate2 runtime state) in memory until the next job.
+        # Registered AFTER engine construction so the callback always sees
+        # a valid self.engine.
+        self.model_manager.on_unload = self._on_model_unloaded
 
         # Initialize skip checker
         self.skip_checker = SkipChecker(config)
@@ -140,6 +159,22 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             f"HealthCheck response: status={status}, memory={memory_mb}MB, uptime={uptime}s"
         )
         return response
+
+    def _on_model_unloaded(self) -> None:
+        """
+        Clear the engine's model reference after model unload.
+
+        Guarded against the unload-reload race: unload() fires this callback
+        only AFTER its heavyweight cleanup phase (gc.collect can take seconds),
+        so a job may have loaded a fresh model in the meantime. Both this
+        check and the Transcribe/DetectLanguage engine.model assignments hold
+        the manager lock, making them mutually exclusive: if a load is in
+        flight we block until it finishes, then see is_loaded() True and
+        leave the fresh reference alone.
+        """
+        with self.model_manager.lock():
+            if not self.model_manager.is_loaded():
+                self.engine.model = None
 
     def _update_progress(self, segments_count: int) -> None:
         """
@@ -208,7 +243,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         try:
             # Load model
             model = self.model_manager.load()
-            self.engine.model = model
+            # Locked assignment — see the comment in Transcribe
+            with self.model_manager.lock():
+                self.engine.model = model
 
             # Detect audio language first (needed for policy decision)
             detection_result = self.engine.detect_language(
@@ -416,7 +453,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         try:
             # Load model
             model = self.model_manager.load()
-            self.engine.model = model
+            # Locked assignment — see the comment in Transcribe
+            with self.model_manager.lock():
+                self.engine.model = model
 
             # Detect language
             detection_result = self.engine.detect_language(source, sample_length, sample_offset)
@@ -455,6 +494,13 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             source_type = "file"
             source = request.file_path
             logger.info(f"Transcribe request received: file_path={request.file_path}")
+
+            # Validate path is non-empty
+            if not request.file_path:
+                logger.error("Transcribe: file_path is empty")
+                context.abort(
+                    grpc.StatusCode.INVALID_ARGUMENT, "file_path must not be empty"
+                )
 
             # Validate file exists
             if not os.path.exists(request.file_path):
@@ -531,7 +577,12 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             # Load model
             logger.info("Loading Whisper model...")
             model = self.model_manager.load()
-            self.engine.model = model
+            # Assignment happens under the manager lock so an unload
+            # callback firing mid-load cannot interleave (see
+            # _on_model_unloaded): the fresh reference is either kept or
+            # written after the callback observed the load.
+            with self.model_manager.lock():
+                self.engine.model = model
             logger.info("Model loaded successfully")
 
             # Prepare transcription options
@@ -543,7 +594,16 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 append_footer=self.config.subtitle.append_footer,
                 show_model_in_filename=self.config.subtitle.show_model_in_filename,
                 show_subgen_in_filename=self.config.subtitle.show_subgen_in_filename,
+                custom_regroup=self.config.transcription.custom_regroup,
             )
+            # Config-level prompt default: gated by use_model_prompt
+            # (USE_MODEL_PROMPT) and supplied by custom_model_prompt
+            # (CUSTOM_MODEL_PROMPT); a per-request custom_prompt wins below.
+            if (
+                self.config.transcription.use_model_prompt
+                and self.config.transcription.custom_model_prompt
+            ):
+                options.custom_prompt = self.config.transcription.custom_model_prompt
 
             # Override with request options if provided
             if request.options:
@@ -553,6 +613,8 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     options.word_level_highlight = request.options.word_level_highlight
                 if request.options.custom_regroup:
                     options.custom_regroup = request.options.custom_regroup
+                if request.options.custom_prompt:
+                    options.custom_prompt = request.options.custom_prompt
 
             # Check if multi-language transcription is requested
             target_languages = list(request.target_languages) if request.target_languages else []

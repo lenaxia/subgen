@@ -19,7 +19,12 @@ sys.path.insert(0, str(worker_root))
 
 from language_code import LanguageCode
 
-from audio.extractor import has_audio, handle_multiple_audio_tracks, AudioExtractionError
+from audio.extractor import (
+    has_audio,
+    select_audio_track,
+    extract_audio_track_to_file,
+    AudioExtractionError,
+)
 from language.detector import (
     detect_language_from_file,
     detect_language_from_bytes,
@@ -161,26 +166,23 @@ class TranscriptionEngine:
             if not self.model:
                 raise RuntimeError("Model not loaded")
 
-            # Handle multiple audio tracks
+            # Handle multiple audio tracks: stream the selected track to a
+            # temp file on disk. The previous implementation buffered the
+            # entire track WAV in RAM twice (~460MB peak for a 2h movie).
             data = file_path
-            extracted_audio = handle_multiple_audio_tracks(
+            selected_track = select_audio_track(
                 file_path, force_language if force_language else None
             )
-            if extracted_audio:
-                try:
-                    # Write audio bytes to temporary file
-                    import tempfile
+            if selected_track is not None:
+                import tempfile
 
-                    temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
-                    temp_file.write(extracted_audio.read())
-                    temp_file.close()
-                    data = temp_file.name
-
-                    # Track temp file for cleanup (use append, not reassignment,
-                    # so the bytes-source temp file added above is not orphaned)
-                    temp_files.append(temp_file.name)
-                finally:
-                    extracted_audio.close()
+                temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
+                temp_file.close()
+                # Track for cleanup BEFORE extraction: a failed extraction
+                # (corrupt media, bad track) must still remove the temp file.
+                data = temp_file.name
+                temp_files.append(temp_file.name)
+                extract_audio_track_to_file(file_path, selected_track.index, temp_file.name)
 
             # Prepare transcription args
             args = {

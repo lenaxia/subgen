@@ -243,6 +243,11 @@ class SystemConfig(BaseSettings):
         default="INFO",
         description="Logging level",
     )
+    log_format: Literal["json", "text"] = Field(
+        default="json",
+        validation_alias=AliasChoices("LOG_FORMAT"),
+        description="Console log output format (json or text)",
+    )
 
     @model_validator(mode="after")
     def validate_threading_config(self) -> "SystemConfig":
@@ -310,6 +315,24 @@ class TranscriptionConfig(BaseSettings):
         ge=60,
         description="ASR timeout in seconds",
     )
+    custom_regroup: str = Field(
+        default="cm_sl=84_sl=42++++++1",
+        validation_alias=AliasChoices("CUSTOM_REGROUP"),
+        description="stable-ts regroup string controlling line breaks "
+        "(e.g. cm_sl=84_sl=42++++++1: max 84 chars, prefer 42 per line)",
+    )
+    use_model_prompt: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("USE_MODEL_PROMPT"),
+        description="Gate whether the model receives an initial prompt "
+        "(from custom_model_prompt) by default",
+    )
+    custom_model_prompt: str = Field(
+        default="",
+        validation_alias=AliasChoices("CUSTOM_MODEL_PROMPT"),
+        description="Default initial_prompt text passed to Whisper when "
+        "use_model_prompt is true and the request does not override it",
+    )
 
 
 class SubtitleConfig(BaseSettings):
@@ -332,7 +355,7 @@ class SubtitleConfig(BaseSettings):
     )
     custom_language_name: str = Field(
         default="",
-        validation_alias="NAMESUBLANG",
+        validation_alias=AliasChoices("NAMESUBLANG", "SUBTITLE_LANGUAGE_NAME"),
         description="Custom language name for subtitles",
     )
     show_subgen_in_filename: bool = Field(
@@ -345,6 +368,7 @@ class SubtitleConfig(BaseSettings):
     )
     append_footer: bool = Field(
         default=False,
+        validation_alias=AliasChoices("APPEND"),
         description="Append 'Transcribed by whisperAI' footer",
     )
 
@@ -469,6 +493,19 @@ class ModelLifecycleConfig(BaseSettings):
     clear_vram_on_complete: bool = Field(
         default=True,
         description="Clear CUDA VRAM after transcription",
+    )
+    unload_on_idle: Optional[bool] = Field(
+        default=None,
+        validation_alias=AliasChoices("UNLOAD_MODEL_ON_IDLE", "MODEL_UNLOAD_ON_IDLE"),
+        description="""Whether to unload the Whisper model after cleanup_delay seconds of idle.
+
+        Default (None) = auto: unload only when TRANSCRIBE_DEVICE=cuda. On CPU,
+        repeated load/unload cycles fragment the native heap and RSS grows
+        ~20-30MB per cycle (measured: +200MB over 10 job cycles with the tiny
+        model; worse with medium). Keeping the model resident on CPU keeps
+        memory flat at the cost of idle RAM. Set true to force CPU unloads
+        (sparse jobs, tight memory), false to never unload.
+        """,
     )
 
 
