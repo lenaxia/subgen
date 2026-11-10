@@ -24,7 +24,7 @@ RUN grep -v -E "^(torch|torchaudio|av)==" /tmp/requirements-orig.txt > requireme
 RUN pip install --no-cache-dir -r requirements.txt
 
 # Now install av with pre-built wheel if available, or skip for now
-RUN pip install --no-cache-dir av==11.0.0 || echo "Warning: PyAV not installed, will use ffmpeg-python fallback"
+RUN pip install --no-cache-dir av==15.1.0 || echo "Warning: PyAV not installed, will use ffmpeg-python fallback"
 
 # Copy application code
 COPY src/ ./src/

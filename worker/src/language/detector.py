@@ -78,8 +78,10 @@ def detect_language_from_file(
         # buffer; we need the bytes on disk for faster-whisper.
         with extract_audio_segment(file_path, sample_offset, sample_length) as sample:
             with tempfile.NamedTemporaryFile(suffix=".wav", delete=False) as tf:
-                tf.write(sample.read())
+                # Capture the path BEFORE writing: a write/read failure still
+                # leaves the created file, so finally-cleanup must know it.
                 temp_path = tf.name
+                tf.write(sample.read())
 
         segments_generator, info = model.transcribe(temp_path, beam_size=5)
 

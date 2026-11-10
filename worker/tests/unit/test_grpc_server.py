@@ -173,10 +173,23 @@ def test_detect_language_uses_default_sample_length(servicer, mock_context):
     """Test DetectLanguage uses default sample length if not specified."""
     request = transcription_pb2.DetectLanguageRequest(file_path="/test/audio.mp3")
 
+    # Protobuf default is 0; the RPC must clamp it to 30s before the engine
+    # sees it (a 0-second sample would detect nothing).
+    captured = {}
+
+    def fake_detect(source, sample_length, sample_offset):
+        captured["sample_length"] = sample_length
+        result = Mock()
+        result.language_code = "en"
+        result.language_name = "English"
+        result.confidence = 0.9
+        return result
+
+    servicer.engine.detect_language = fake_detect
     response = servicer.DetectLanguage(request, mock_context)
 
-    # Should not crash with missing sample_length
     assert response is not None
+    assert captured["sample_length"] == 30
 
 
 def test_detect_language_handles_file_not_found(servicer, mock_context):
@@ -322,3 +335,38 @@ def test_servicer_has_all_required_methods(mock_config):
     assert callable(servicer.HealthCheck)
     assert callable(servicer.DetectLanguage)
     assert callable(servicer.Transcribe)
+
+
+# ============================================================================
+# Model Unload Callback Wiring Tests
+# ============================================================================
+
+
+@patch("transcription.model_manager.stable_whisper")
+def test_on_unload_callback_registered_on_real_manager(mock_whisper, mock_config):
+    """Regression (review F2/claim 7): the servicer must register _on_model_unloaded
+    on the REAL model manager (the shared fixture swaps it for a Mock, which never
+    exercised the wiring)."""
+    svc = TranscriptionServicer(mock_config)
+    # Bound methods: use == (each attribute access creates a new object)
+    assert svc.model_manager.on_unload == svc._on_model_unloaded
+
+
+def test_on_model_unloaded_clears_engine_reference(servicer):
+    """_on_model_unloaded clears engine.model when the manager has unloaded."""
+    servicer.engine.model = Mock()
+    servicer.model_manager.is_loaded.return_value = False
+    servicer._on_model_unloaded()
+    assert servicer.engine.model is None
+
+
+def test_on_model_unloaded_race_guard_keeps_fresh_model(servicer):
+    """Regression (review F2): unload fires its callback AFTER a seconds-wide
+    heavy phase (gc.collect). If a new job loaded a fresh model in that window,
+    the callback must NOT null out engine.model — that fails the in-flight job
+    with 'Model not loaded'."""
+    fresh_model = Mock()
+    servicer.engine.model = fresh_model
+    servicer.model_manager.is_loaded.return_value = True  # fresh reload happened
+    servicer._on_model_unloaded()
+    assert servicer.engine.model is fresh_model

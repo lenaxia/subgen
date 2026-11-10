@@ -160,13 +160,23 @@ CONCURRENT_TRANSCRIPTIONS: "2"  # Depends on CPU cores
 
 | Variable | Default | Description | Example |
 |----------|---------|-------------|---------|
-| `MODEL_CLEANUP_DELAY` | `300` | Seconds before unloading idle model | `300` (5 minutes) |
+| `MODEL_CLEANUP_DELAY` | `30` | Seconds to wait before unloading the idle model | `300` (5 minutes) |
+| `UNLOAD_MODEL_ON_IDLE` | auto | Idle unload behavior (aliases: `MODEL_UNLOAD_ON_IDLE`) — see below | `false` on CPU |
 | `CLEAR_VRAM_ON_COMPLETE` | `true` | Clear CUDA VRAM after transcription | `false` for CPU workers |
 | `QUEUE_MAX_SIZE` | `1000` | Maximum tasks in queue | `1000` |
 | `QUEUE_WORKER_TIMEOUT` | `18000` | Worker timeout in seconds (5 hours) | `18000` |
 
+**Idle unload (`UNLOAD_MODEL_ON_IDLE`)**:
+- unset (auto): unload after `MODEL_CLEANUP_DELAY` on CUDA only. On CPU the
+  model stays resident: repeated load/unload cycles fragment the native heap
+  and RSS ratchets +20–30MB per cycle (measured with the tiny model). This is
+  the recommended default on CPU workers.
+- `true`: force idle unload even on CPU (sparse jobs, tight memory; slower
+  job start and higher RSS churn).
+- `false`: never unload on idle (model stays resident everywhere).
+
 **Cleanup Strategy**:
-- `MODEL_CLEANUP_DELAY=0`: Unload immediately after each job (slow, saves memory)
+- `MODEL_CLEANUP_DELAY=0`: Unload immediately after each job (slow, saves memory — CUDA only unless `UNLOAD_MODEL_ON_IDLE=true`)
 - `MODEL_CLEANUP_DELAY=300`: Keep loaded for 5 minutes (balanced)
 - `MODEL_CLEANUP_DELAY=1800`: Keep loaded for 30 minutes (fast, uses more memory)
 

@@ -201,6 +201,11 @@ class ModelManager:
 
         This method is idempotent - safe to call multiple times.
 
+        Skips the model teardown while a `with manager:` context is active
+        (_context_depth > 0): the context exit owns the unload. This closes
+        the TOCTOU where a timer-driven unload could destroy a model that a
+        concurrent __enter__ had just loaded.
+
         Thread Safety:
             Safe to call from multiple threads simultaneously. Model
             reference release is done under the lock; the heavyweight
@@ -211,6 +216,13 @@ class ModelManager:
         with self._lock:
             if self._model is None:
                 logger.debug("Model already unloaded, nothing to do")
+                return
+
+            if self._context_depth > 0:
+                logger.debug(
+                    "Model context active (depth %d); deferring unload to context exit",
+                    self._context_depth,
+                )
                 return
 
             logger.info("Unloading Whisper model from memory")
@@ -231,7 +243,7 @@ class ModelManager:
 
         try:
             # Step 2: Clear CUDA cache if using GPU
-            if self.config.device.lower() == "cuda" and torch.cuda.is_available():
+            if self.config.device.lower() in ("cuda", "gpu") and torch.cuda.is_available():
                 try:
                     torch.cuda.empty_cache()
                     logger.debug("CUDA cache cleared")
@@ -451,7 +463,15 @@ class ModelManager:
         with self._lock:
             self._context_depth += 1
 
-        return self.load()
+        try:
+            return self.load()
+        except Exception:
+            # A failed load must not leak the depth increment: __exit__ never
+            # runs when __enter__ raises, and a leaked depth would suppress
+            # every subsequent unload (outermost exit never reached).
+            with self._lock:
+                self._context_depth -= 1
+            raise
 
     def __exit__(
         self,

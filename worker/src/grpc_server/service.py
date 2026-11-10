@@ -85,13 +85,15 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         )
         self.model_manager = ModelManager(model_config)
 
+        # Initialize transcription engine
+        self.engine = TranscriptionEngine(config)
+
         # Drop the engine's model reference whenever the manager unloads the
         # model, otherwise engine.model pins the unloaded WhisperModel (and
         # its ctranslate2 runtime state) in memory until the next job.
+        # Registered AFTER engine construction so the callback always sees
+        # a valid self.engine.
         self.model_manager.on_unload = self._on_model_unloaded
-
-        # Initialize transcription engine
-        self.engine = TranscriptionEngine(config)
 
         # Initialize skip checker
         self.skip_checker = SkipChecker(config)
@@ -152,8 +154,17 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         return response
 
     def _on_model_unloaded(self) -> None:
-        """Clear the engine's model reference after model unload."""
-        self.engine.model = None
+        """
+        Clear the engine's model reference after model unload.
+
+        Guarded against the unload-reload race: unload() fires this callback
+        only AFTER its heavyweight cleanup phase (gc.collect can take seconds),
+        so a job may have loaded a fresh model in the meantime. Only clear
+        engine.model when the manager really has nothing loaded — otherwise
+        we would null out the fresh reference and fail the in-flight job.
+        """
+        if not self.model_manager.is_loaded():
+            self.engine.model = None
 
     def _update_progress(self, segments_count: int) -> None:
         """

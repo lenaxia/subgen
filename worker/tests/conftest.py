@@ -19,16 +19,18 @@ sys.path.insert(0, str(worker_dir / "pb"))
 
 @pytest.fixture
 def mock_config() -> MagicMock:
-    """Mock configuration object."""
+    """Mock configuration object mirroring the real nested settings shape."""
     config = MagicMock()
-    config.whisper_model = "tiny"
-    config.whisper_threads = 4
-    config.device = "cpu"
-    config.compute_type = "int8"
-    config.model_path = "/tmp/models"
+    config.whisper.model_name = "tiny"
+    config.whisper.threads = 4
+    config.whisper.device = "cpu"
+    config.whisper.compute_type = "int8"
+    config.whisper.model_path = "/tmp/models"
     config.memory_threshold_mb = 3000
-    config.model_cleanup_delay = 30
-    config.clear_vram_on_complete = True
+    config.model_lifecycle.cleanup_delay = 30
+    config.model_lifecycle.clear_vram_on_complete = True
+    config.model_lifecycle.unload_on_idle = None  # auto
+    config.system.max_workers = 10
     config.version = "1.0.0"
     return config
 

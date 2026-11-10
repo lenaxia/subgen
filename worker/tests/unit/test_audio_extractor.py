@@ -4,6 +4,7 @@ Unit tests for audio extraction module.
 Tests extracted logic from subgen.py:1318-1350, 1352-1386, 1446-1490, 2016-2038
 """
 
+import subprocess
 import pytest
 from unittest.mock import Mock, patch, MagicMock
 from io import BytesIO
@@ -393,3 +394,69 @@ class TestAudioTrackInfo:
         track = AudioTrackInfo(index=1, codec="ac3", channels=6, language="jpn", is_default=False)
 
         assert track.title is None
+
+
+class TestExtractAudioTrackToFile:
+    """Tests for the disk-streaming track extraction (PR review coverage gap).
+
+    extract_audio_track_to_file is the production path for multi-track media;
+    previously it had NO direct unit tests (only the happy-path engine test).
+    """
+
+    def _mock_ffmpeg_cmd(self):
+        """Patch ffmpeg.input/.output/.compile to yield a dummy argv."""
+        return (
+            patch("ffmpeg.input"),
+            patch("ffmpeg.output"),
+            patch("ffmpeg.compile", return_value=["ffmpeg", "-i", "in", "out.wav"]),
+        )
+
+    def test_success_returns_dest_path(self):
+        """Zero returncode returns the destination path."""
+        p1, p2, p3 = self._mock_ffmpeg_cmd()
+        with p1, p2, p3, patch("subprocess.Popen") as mock_popen:
+            proc = Mock()
+            proc.returncode = 0
+            proc.communicate.return_value = (b"", b"")
+            mock_popen.return_value = proc
+            from audio.extractor import extract_audio_track_to_file
+
+            result = extract_audio_track_to_file("/test/video.mkv", 1, "/tmp/out.wav")
+        assert result == "/tmp/out.wav"
+        # stdout must go to DEVNULL (writing it to a pipe we never read can
+        # deadlock on large outputs)
+        _, kwargs = mock_popen.call_args
+        assert kwargs.get("stdout") == subprocess.DEVNULL
+        assert kwargs.get("stderr") == subprocess.PIPE
+
+    def test_nonzero_returncode_raises_with_stderr(self):
+        """Nonzero ffmpeg exit raises AudioExtractionError carrying stderr."""
+        p1, p2, p3 = self._mock_ffmpeg_cmd()
+        with p1, p2, p3, patch("subprocess.Popen") as mock_popen:
+            proc = Mock()
+            proc.returncode = 1
+            proc.communicate.return_value = (b"", b"Stream map '0:9' matches no streams")
+            mock_popen.return_value = proc
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="matches no streams"):
+                extract_audio_track_to_file("/test/video.mkv", 9, "/tmp/out.wav")
+
+    def test_ffmpeg_error_wrapped(self):
+        """ffmpeg.Error (e.g. from compile) is wrapped as AudioExtractionError."""
+        import ffmpeg as real_ffmpeg
+
+        with patch("ffmpeg.input") as mock_input:
+            mock_input.side_effect = real_ffmpeg.Error("bad input", b"", b"kaput")
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="kaput"):
+                extract_audio_track_to_file("/test/video.mkv", 0, "/tmp/out.wav")
+
+    def test_generic_exception_wrapped(self):
+        """Unexpected exceptions (e.g. missing file) become AudioExtractionError."""
+        with patch("ffmpeg.input", side_effect=FileNotFoundError("no such file")):
+            from audio.extractor import extract_audio_track_to_file
+
+            with pytest.raises(AudioExtractionError, match="no such file"):
+                extract_audio_track_to_file("/nonexistent.mkv", 0, "/tmp/out.wav")

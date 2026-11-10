@@ -479,6 +479,30 @@ class TestModelLifecycleConfig:
         with pytest.raises(ValidationError):
             ModelLifecycleConfig(cleanup_delay=-1)
 
+    def test_unload_on_idle_defaults_to_auto_none(self):
+        """Default unload_on_idle is None (= auto: unload only on CUDA)."""
+        assert ModelLifecycleConfig().unload_on_idle is None
+
+    def test_unload_on_idle_env_aliases(self, monkeypatch):
+        """Both UNLOAD_MODEL_ON_IDLE and MODEL_UNLOAD_ON_IDLE parse from env."""
+        monkeypatch.setenv("UNLOAD_MODEL_ON_IDLE", "true")
+        assert ModelLifecycleConfig().unload_on_idle is True
+
+        monkeypatch.setenv("UNLOAD_MODEL_ON_IDLE", "false")
+        assert ModelLifecycleConfig().unload_on_idle is False
+
+        # AliasChoices prefers the first alias, so remove it before testing
+        # the fallback alias in isolation
+        monkeypatch.delenv("UNLOAD_MODEL_ON_IDLE")
+        monkeypatch.setenv("MODEL_UNLOAD_ON_IDLE", "true")
+        assert ModelLifecycleConfig().unload_on_idle is True
+
+    def test_unload_on_idle_invalid_env_rejected(self, monkeypatch):
+        """Non-bool env values must fail loudly, not silently become auto."""
+        monkeypatch.setenv("UNLOAD_MODEL_ON_IDLE", "not-a-bool")
+        with pytest.raises(ValidationError):
+            ModelLifecycleConfig()
+
 
 class TestWorkerSettings:
     """Test master configuration."""

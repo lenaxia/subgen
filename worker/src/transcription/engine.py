@@ -178,12 +178,11 @@ class TranscriptionEngine:
 
                 temp_file = tempfile.NamedTemporaryFile(suffix=".wav", delete=False)
                 temp_file.close()
-                extract_audio_track_to_file(file_path, selected_track.index, temp_file.name)
+                # Track for cleanup BEFORE extraction: a failed extraction
+                # (corrupt media, bad track) must still remove the temp file.
                 data = temp_file.name
-
-                # Track temp file for cleanup (use append, not reassignment,
-                # so the bytes-source temp file added above is not orphaned)
                 temp_files.append(temp_file.name)
+                extract_audio_track_to_file(file_path, selected_track.index, temp_file.name)
 
             # Prepare transcription args
             args = {

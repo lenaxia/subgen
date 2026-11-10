@@ -191,22 +191,19 @@ def select_audio_track(
     return selected_track
 
 
-def extract_audio_track_to_file(
-    file_path: str, track_index: int, dest_path: str, chunk_size: int = 1024 * 1024
-) -> str:
+def extract_audio_track_to_file(file_path: str, track_index: int, dest_path: str) -> str:
     """
-    Extract an audio track to a WAV file on disk, streaming.
+    Extract an audio track to a WAV file on disk.
 
     Unlike extract_audio_track (which accumulates the entire WAV in RAM via
     capture_stdout, ~32KB/s => ~230MB for a 2h movie, doubled by BytesIO
-    copies), this streams ffmpeg's stdout to dest_path in chunks so peak
-    memory stays at ~chunk_size regardless of media length.
+    copies), ffmpeg writes dest_path directly, so peak memory is O(1)
+    regardless of media length.
 
     Args:
         file_path: Path to media file
         track_index: Index of the audio track to extract
         dest_path: Destination WAV path (16kHz mono)
-        chunk_size: Read chunk size in bytes
 
     Returns:
         dest_path

@@ -123,7 +123,7 @@ services:
       - WHISPER_MODEL=medium
       - CONCURRENT_TRANSCRIPTIONS=2
       - COMPUTE_TYPE=auto
-      - MODEL_CLEANUP_DELAY=300  # Seconds before model unload
+      - MODEL_CLEANUP_DELAY=300  # Seconds before idle model unload (CUDA; CPU keeps model resident by default)
       
     volumes:
       - ./models:/models  # Persistent model storage (2-3GB)
@@ -315,8 +315,9 @@ Create webhooks in Tautulli:
 | `WHISPER_THREADS` | `4` | CPU threads for computation |
 | `COMPUTE_TYPE` | `auto` | `int8`, `int8_float16`, `float16`, `float32` |
 | `MODEL_PATH` | `/models` | Model storage location |
-| `MODEL_CLEANUP_DELAY` | `300` | Seconds before model unload (memory management) |
-| `CLEAR_VRAM_ON_COMPLETE` | `true` | Unload model when queue empty |
+| `MODEL_CLEANUP_DELAY` | `30` | Seconds to wait before unloading the idle model (memory management) |
+| `UNLOAD_MODEL_ON_IDLE` | auto | Idle model unload: unset = unload on CUDA only (CPU keeps the model resident to avoid heap-fragmentation RSS growth); `true` = force unload on CPU; `false` = never unload. Alias: `MODEL_UNLOAD_ON_IDLE` |
+| `CLEAR_VRAM_ON_COMPLETE` | `true` | Clear CUDA VRAM after transcription |
 
 ## Skip Conditions
 
@@ -728,7 +729,7 @@ The system provides flexible control from fully automated to completely manual, 
 
 This fork fixes all known memory leaks. If you still see growth:
 1. Verify you're using the fork images (`ghcr.io/lenaxia/subgen-*`)
-2. Check `MODEL_CLEANUP_DELAY` is set (default: 300s)
+2. Check `MODEL_CLEANUP_DELAY` is set (default: 30s) and `UNLOAD_MODEL_ON_IDLE` (default: auto — CPU workers keep the model resident to avoid heap-fragmentation RSS growth)
 3. Report issue with memory graph
 
 ## Worker not connecting
@@ -765,7 +766,7 @@ This fork fixes all known memory leaks. If you still see growth:
 **Memory Management**:
 ```yaml
 - MODEL_CLEANUP_DELAY=300  # Longer = more model reuse
-- CLEAR_VRAM_ON_COMPLETE=true  # Unload when idle
+- UNLOAD_MODEL_ON_IDLE=false  # CPU: keep model resident (auto already does this)
 ```
 
 **Model Selection**:

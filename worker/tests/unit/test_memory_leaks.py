@@ -501,3 +501,96 @@ class TestMemoryLeakDocumentation:
         - test_timer_cleanup_no_accumulation
         """
         assert True  # Documentation test
+
+
+class TestLockDiscipline:
+    """Regression tests for the unload lock discipline (PR review findings).
+
+    LEGACY BUGS:
+    - unload() ran gc.collect + malloc_trim while holding self._lock, so
+      HealthCheck / is_loaded() blocked for the full (13s+ measured) cleanup.
+    - unload() could destroy a model a concurrent __enter__ had just loaded
+      (TOCTOU between __exit__'s depth decision and the teardown).
+    - A failed __enter__ load leaked the depth increment, suppressing every
+      subsequent unload.
+    """
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_heavy_cleanup_does_not_block_other_threads(self, mock_whisper):
+        """Other threads must not block on the lock while gc.collect runs.
+
+        The heavy phase (gc + malloc_trim) runs OUTSIDE the lock: while it
+        sleeps, another thread's is_loaded() must return promptly. With the
+        pre-fix code (heavy phase under the lock) this test fails: the
+        is_loaded() call blocks for the full gc duration.
+        """
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+        manager.load()
+
+        gc_entered = threading.Event()
+        real_collect = gc.collect
+
+        def slow_collect():
+            gc_entered.set()
+            time.sleep(1.0)
+            return 0
+
+        def unloader():
+            with patch("gc.collect", side_effect=slow_collect):
+                manager.unload()
+
+        t = threading.Thread(target=unloader, daemon=True)
+        t.start()
+        assert gc_entered.wait(timeout=5), "unload never reached the gc phase"
+
+        start = time.time()
+        loaded = manager.is_loaded()  # must not wait on the sleeping gc
+        elapsed = time.time() - start
+
+        t.join(timeout=10)
+        assert elapsed < 0.5, f"is_loaded() blocked {elapsed:.2f}s during unload's gc phase"
+        assert loaded is False
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_unload_deferred_while_context_active(self, mock_whisper):
+        """TOCTOU guard: unload() must not destroy a model inside an active
+        `with manager:` context — the context exit owns the unload."""
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        manager.__enter__()
+        # Timer-style direct unload while the context is active
+        manager.unload()
+        assert manager.is_loaded(), "unload() destroyed the model while a context held it"
+
+        manager.__exit__(None, None, None)
+        assert not manager.is_loaded(), "outermost context exit did not unload"
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_failed_load_does_not_leak_context_depth(self, mock_whisper):
+        """A failed __enter__ load must unwind the depth increment.
+
+        LEGACY BUG: __enter__ incremented _context_depth before load(); when
+        load raised, __exit__ never ran, the depth stayed >0 forever, and
+        unload() was suppressed for the lifetime of the manager.
+        """
+        mock_whisper.load_faster_whisper.side_effect = RuntimeError("boom")
+        manager = ModelManager(ModelConfig(cleanup_delay=1, unload_on_idle=True))
+        manager.on_unload = None
+
+        with pytest.raises(RuntimeError):
+            manager.__enter__()
+        assert manager._context_depth == 0, "failed load leaked the depth increment"
+
+        # A later unload must not be suppressed by a leaked depth
+        mock_whisper.load_faster_whisper.side_effect = None
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        manager.load()
+        manager.unload()
+        assert not manager.is_loaded()
