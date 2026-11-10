@@ -68,9 +68,16 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         self._progress_timeout_seconds: int = 300  # 5 minutes without progress = stuck
 
         # Initialize model manager. unload_on_idle may be absent on older
-        # config objects / Mocks; coerce non-bool values to the auto default.
+        # config objects / Mocks (getattr default); a present-but-non-bool
+        # value is loudly warned about and coerced to auto rather than
+        # silently ignored.
         unload_on_idle = getattr(config.model_lifecycle, "unload_on_idle", None)
         if not isinstance(unload_on_idle, bool):
+            logger.warning(
+                "model_lifecycle.unload_on_idle=%r is not a bool; "
+                "coercing to auto (None = unload on CUDA only)",
+                unload_on_idle,
+            )
             unload_on_idle = None
         model_config = ModelConfig(
             model_name=config.whisper.model_name,
@@ -159,12 +166,15 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
 
         Guarded against the unload-reload race: unload() fires this callback
         only AFTER its heavyweight cleanup phase (gc.collect can take seconds),
-        so a job may have loaded a fresh model in the meantime. Only clear
-        engine.model when the manager really has nothing loaded — otherwise
-        we would null out the fresh reference and fail the in-flight job.
+        so a job may have loaded a fresh model in the meantime. Both this
+        check and the Transcribe/DetectLanguage engine.model assignments hold
+        the manager lock, making them mutually exclusive: if a load is in
+        flight we block until it finishes, then see is_loaded() True and
+        leave the fresh reference alone.
         """
-        if not self.model_manager.is_loaded():
-            self.engine.model = None
+        with self.model_manager.lock():
+            if not self.model_manager.is_loaded():
+                self.engine.model = None
 
     def _update_progress(self, segments_count: int) -> None:
         """
@@ -233,7 +243,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         try:
             # Load model
             model = self.model_manager.load()
-            self.engine.model = model
+            # Locked assignment — see the comment in Transcribe
+            with self.model_manager.lock():
+                self.engine.model = model
 
             # Detect audio language first (needed for policy decision)
             detection_result = self.engine.detect_language(
@@ -441,7 +453,9 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
         try:
             # Load model
             model = self.model_manager.load()
-            self.engine.model = model
+            # Locked assignment — see the comment in Transcribe
+            with self.model_manager.lock():
+                self.engine.model = model
 
             # Detect language
             detection_result = self.engine.detect_language(source, sample_length, sample_offset)
@@ -563,7 +577,12 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
             # Load model
             logger.info("Loading Whisper model...")
             model = self.model_manager.load()
-            self.engine.model = model
+            # Assignment happens under the manager lock so an unload
+            # callback firing mid-load cannot interleave (see
+            # _on_model_unloaded): the fresh reference is either kept or
+            # written after the callback observed the load.
+            with self.model_manager.lock():
+                self.engine.model = model
             logger.info("Model loaded successfully")
 
             # Prepare transcription options
@@ -575,7 +594,16 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                 append_footer=self.config.subtitle.append_footer,
                 show_model_in_filename=self.config.subtitle.show_model_in_filename,
                 show_subgen_in_filename=self.config.subtitle.show_subgen_in_filename,
+                custom_regroup=self.config.transcription.custom_regroup,
             )
+            # Config-level prompt default: gated by use_model_prompt
+            # (USE_MODEL_PROMPT) and supplied by custom_model_prompt
+            # (CUSTOM_MODEL_PROMPT); a per-request custom_prompt wins below.
+            if (
+                self.config.transcription.use_model_prompt
+                and self.config.transcription.custom_model_prompt
+            ):
+                options.custom_prompt = self.config.transcription.custom_model_prompt
 
             # Override with request options if provided
             if request.options:
@@ -585,6 +613,8 @@ class TranscriptionServicer(transcription_pb2_grpc.TranscriptionServiceServicer)
                     options.word_level_highlight = request.options.word_level_highlight
                 if request.options.custom_regroup:
                     options.custom_regroup = request.options.custom_regroup
+                if request.options.custom_prompt:
+                    options.custom_prompt = request.options.custom_prompt
 
             # Check if multi-language transcription is requested
             target_languages = list(request.target_languages) if request.target_languages else []

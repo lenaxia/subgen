@@ -19,6 +19,7 @@ import os
 import gc
 import ctypes
 import ctypes.util
+from contextlib import contextmanager
 from threading import RLock, Timer, Event
 from typing import Optional, Any, Callable
 from dataclasses import dataclass, field
@@ -110,6 +111,10 @@ class ModelManager:
         self._cleanup_timer: Optional[Timer] = None
         self._cleanup_event = Event()
         self._context_depth = 0  # For nested context managers
+        # Bumped on every load call; lets a firing cleanup timer detect that
+        # the model it was scheduled for was since reloaded/reused, so a
+        # stale timer can never unload a model a newer job is using.
+        self._load_generation = 0
 
         # Optional callback invoked after the model has been unloaded,
         # so owners (e.g. TranscriptionEngine) can drop stale references.
@@ -156,6 +161,13 @@ class ModelManager:
             Safe to call from multiple threads simultaneously.
         """
         with self._lock:
+            # Any load call means the model is about to be used: a pending
+            # idle-unload timer is stale (it would fire mid-job otherwise)
+            # and is cancelled here. The generation bump additionally
+            # disarms a timer that already fired and is about to unload.
+            self.cancel_cleanup()
+            self._load_generation += 1
+
             if self._model is not None:
                 logger.debug("Model already loaded, reusing existing instance")
                 return self._model
@@ -323,8 +335,16 @@ class ModelManager:
             # Reset event for new timer
             self._cleanup_event.clear()
 
-            # Schedule new cleanup
-            self._cleanup_timer = Timer(delay, self._perform_cleanup)
+            # Schedule new cleanup. The timer and the load generation at
+            # schedule time are captured so the callback can (a) only clear
+            # its OWN timer reference — schedule_cleanup during a long
+            # unload creates a newer timer whose reference must not be
+            # lost — and (b) skip the unload entirely if the model was
+            # reloaded since scheduling (stale timer must not destroy a
+            # model a newer job is using).
+            generation = self._load_generation
+            timer = Timer(delay, lambda: self._perform_cleanup(timer, generation))
+            self._cleanup_timer = timer
             self._cleanup_timer.daemon = True
             self._cleanup_timer.start()
 
@@ -376,24 +396,59 @@ class ModelManager:
             logger.debug("Queue not idle, skipping cleanup scheduling")
             return False
 
-    def _perform_cleanup(self) -> None:
+    def _perform_cleanup(self, timer: Optional[Timer] = None, generation: Optional[int] = None) -> None:
         """
         Internal method called by Timer.
 
         Checks if cleanup event was set (timer cancelled) before proceeding.
         This prevents cleanup from running if timer was cancelled.
+
+        Args:
+            timer: The Timer instance that invoked this callback (used to
+                only clear our own reference — a schedule_cleanup during the
+                unload below creates a newer timer).
+            generation: The load generation captured at schedule time; if
+                the model was reloaded since, this cleanup is stale and must
+                NOT unload (a newer job owns the model now).
         """
         # Check if we were cancelled
         if self._cleanup_event.is_set():
             logger.debug("Cleanup cancelled, timer exiting")
             return
 
-        logger.debug("Executing scheduled cleanup")
-        self.unload()
+        # Stale timer: the model was reloaded/reused since this cleanup was
+        # scheduled (e.g. the next job started before the idle delay
+        # elapsed). Unloading would destroy the in-flight job's model.
+        if generation is not None and generation != self._load_generation:
+            logger.debug(
+                "Cleanup stale (scheduled at generation %d, current %d); skipping unload",
+                generation,
+                self._load_generation,
+            )
+        else:
+            logger.debug("Executing scheduled cleanup")
+            self.unload()
 
-        # Clear timer reference
+        # Clear timer reference ONLY if we are still the current timer
         with self._lock:
-            self._cleanup_timer = None
+            if self._cleanup_timer is timer:
+                self._cleanup_timer = None
+
+    @contextmanager
+    def lock(self):
+        """
+        Expose the manager lock to owners that need cross-object atomicity
+        (e.g. TranscriptionServicer assigning engine.model under the same
+        lock that guards _model, so unload callbacks cannot interleave).
+
+        Yields:
+            None (lock held)
+
+        Thread Safety:
+            Reentrant for the same thread (RLock).
+        """
+        with self._lock:
+            yield
 
     def is_loaded(self) -> bool:
         """

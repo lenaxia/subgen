@@ -594,3 +594,115 @@ class TestLockDiscipline:
         manager.load()
         manager.unload()
         assert not manager.is_loaded()
+
+
+class TestCleanupTimerSafety:
+    """Regression tests for cleanup-timer races (follow-up review findings).
+
+    LEGACY BUGS:
+    - _perform_cleanup nulled self._cleanup_timer unconditionally, so a
+      schedule_cleanup() during its unload lost the NEW timer's reference
+      (uncancellable zombie timer).
+    - A timer scheduled for job N could fire while job N+1 was loading or
+      transcribing and unload the model out from under it (no staleness
+      check), and load() never cancelled a stale pending timer.
+    """
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_schedule_during_unload_preserves_new_timer(self, mock_whisper):
+        """A schedule_cleanup() during a long unload must survive it."""
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+        manager.load()
+
+        unload_started = threading.Event()
+        release_unload = threading.Event()
+        real_collect = gc.collect
+
+        def slow_collect():
+            unload_started.set()
+            release_unload.wait(timeout=5)
+            return 0
+
+        def unloader():
+            with patch("gc.collect", side_effect=slow_collect):
+                manager.unload()
+
+        t = threading.Thread(target=unloader, daemon=True)
+        t.start()
+        assert unload_started.wait(timeout=5)
+
+        # While unload's heavy phase is blocked, schedule a new cleanup
+        manager.schedule_cleanup(delay=0.1)
+        new_timer = manager._cleanup_timer
+        assert new_timer is not None
+
+        release_unload.set()
+        t.join(timeout=10)
+
+        # The old cleanup must NOT have clobbered the new timer's reference
+        assert manager._cleanup_timer is new_timer, "new timer reference was lost"
+
+        # The new timer fires (0.1s) and completes: ref cleared, model stays
+        # unloaded. Note the model was already unloaded by the FIRST unload
+        # (ref cleared before the heavy phase) — the new timer's unload is
+        # then a no-op that still releases its own reference.
+        deadline = time.time() + 5
+        while manager._cleanup_timer is not None and time.time() < deadline:
+            time.sleep(0.05)
+        assert manager._cleanup_timer is None, "new timer never released its reference"
+        assert not manager.is_loaded()
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_stale_timer_does_not_unload_newer_load(self, mock_whisper):
+        """A timer scheduled for job N must not unload job N+1's model.
+
+        Reproduces the CUDA mid-transcription unload: idle timer armed, the
+        next job loads (generation bump + cancel), but the timer already
+        fired and is heading into unload — the generation check must skip it.
+        """
+        mock_model = MagicMock()
+        mock_whisper.load_faster_whisper.return_value = mock_model
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        # Arm a cleanup with a generous delay, then simulate the next job:
+        # the load call must cancel the pending timer and bump the generation.
+        manager.load()
+        manager.schedule_cleanup(delay=5)
+        timer = manager._cleanup_timer
+        assert timer is not None
+
+        # Simulate a timer that already fired and passed the event check,
+        # i.e. _perform_cleanup is about to run with the OLD generation.
+        old_generation = manager._load_generation
+        manager.load()  # next job: generation bumps, pending timer cancelled
+        assert manager._load_generation == old_generation + 1
+
+        # Fire the stale cleanup exactly as the old timer would have
+        manager._perform_cleanup(timer, old_generation)
+
+        assert manager.is_loaded(), "stale timer unloaded the newer job's model"
+
+    @patch("transcription.model_manager.stable_whisper")
+    def test_load_cancels_pending_idle_timer(self, mock_whisper):
+        """load() must cancel a pending idle timer (it would fire mid-job)."""
+        mock_whisper.load_faster_whisper.return_value = MagicMock()
+        config = ModelConfig(cleanup_delay=1, unload_on_idle=True)
+        manager = ModelManager(config)
+        manager.on_unload = None
+
+        manager.load()
+        manager.schedule_cleanup(delay=60)
+        assert manager._cleanup_timer is not None
+
+        manager.load()  # next job starts
+        assert manager._cleanup_timer is None, "load left a pending idle timer armed"
+
+        # ...and the timer must genuinely not fire later
+        time.sleep(0.2)
+        assert manager.is_loaded()

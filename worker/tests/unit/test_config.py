@@ -626,3 +626,50 @@ class TestConfigurationErrorHandling:
         error_msg = str(exc_info.value)
         assert "Configuration validation failed" in error_msg
         assert "system.grpc_port" in error_msg
+
+
+class TestDeployEnvAliases:
+    """Env vars set in docker-compose/k8s deploy files must actually parse.
+
+    LEGACY BUG: CUSTOM_REGROUP, USE_MODEL_PROMPT, CUSTOM_MODEL_PROMPT,
+    LOG_FORMAT, APPEND and SUBTITLE_LANGUAGE_NAME were set in deploy files
+    but had no settings field/alias — pydantic extra="allow" silently
+    swallowed them and the values never reached the worker.
+    """
+
+    def test_custom_regroup_alias(self, monkeypatch):
+        monkeypatch.setenv("CUSTOM_REGROUP", "cm_sl=84_sl=42++++++1")
+        assert TranscriptionConfig().custom_regroup == "cm_sl=84_sl=42++++++1"
+
+    def test_use_model_prompt_alias(self, monkeypatch):
+        monkeypatch.setenv("USE_MODEL_PROMPT", "true")
+        assert TranscriptionConfig().use_model_prompt is True
+
+    def test_custom_model_prompt_alias(self, monkeypatch):
+        monkeypatch.setenv("CUSTOM_MODEL_PROMPT", "Transcribed interview.")
+        assert TranscriptionConfig().custom_model_prompt == "Transcribed interview."
+
+    def test_log_format_alias(self, monkeypatch):
+        monkeypatch.setenv("LOG_FORMAT", "text")
+        assert SystemConfig().log_format == "text"
+        monkeypatch.setenv("LOG_FORMAT", "json")
+        assert SystemConfig().log_format == "json"
+        assert SystemConfig().log_format == "json"  # default
+
+    def test_log_format_invalid_rejected(self, monkeypatch):
+        monkeypatch.setenv("LOG_FORMAT", "xml")
+        with pytest.raises(ValidationError):
+            SystemConfig()
+
+    def test_append_alias(self, monkeypatch):
+        monkeypatch.setenv("APPEND", "true")
+        assert SubtitleConfig().append_footer is True
+
+    def test_subtitle_language_name_alias(self, monkeypatch):
+        monkeypatch.setenv("SUBTITLE_LANGUAGE_NAME", "aa")
+        assert SubtitleConfig().custom_language_name == "aa"
+
+    def test_namesublang_still_works(self, monkeypatch):
+        """The original NAMESUBLANG alias must keep working."""
+        monkeypatch.setenv("NAMESUBLANG", "aa")
+        assert SubtitleConfig().custom_language_name == "aa"
