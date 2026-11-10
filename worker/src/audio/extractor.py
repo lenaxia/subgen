@@ -218,6 +218,15 @@ def extract_audio_track_to_file(file_path: str, track_index: int, dest_path: str
     try:
         # Build the ffmpeg command via ffmpeg-python for filter parity with
         # extract_audio_track, then swap pipe: for the file destination.
+        #
+        # -y: the engine's temp file already exists (NamedTemporaryFile creates
+        # it up front), so without -y ffmpeg shows the interactive
+        # "File already exists. Overwrite? [y/N]" prompt, reads EOF, and exits
+        # 1 — failing EVERY multi-track extraction (regression caught by the
+        # PR #4 skeptical review: standalone extraction onto a fresh path
+        # worked, engine integration failed 100%).
+        # -nostdin + stdin=DEVNULL: never block on or consume the caller's
+        # stdin, regardless of whether the destination exists.
         out = (
             ffmpeg.input(file_path)
             .output(
@@ -228,9 +237,15 @@ def extract_audio_track_to_file(file_path: str, track_index: int, dest_path: str
                 ar=16000,  # 16kHz for Whisper
                 loglevel="quiet",
             )
+            .global_args("-y", "-nostdin")
         )
         cmd = ffmpeg.compile(out)
-        proc = subprocess.Popen(cmd, stdout=subprocess.DEVNULL, stderr=subprocess.PIPE)
+        proc = subprocess.Popen(
+            cmd,
+            stdout=subprocess.DEVNULL,
+            stderr=subprocess.PIPE,
+            stdin=subprocess.DEVNULL,
+        )
         _, stderr = proc.communicate()
         if proc.returncode != 0:
             err = stderr.decode() if stderr else f"ffmpeg exited {proc.returncode}"

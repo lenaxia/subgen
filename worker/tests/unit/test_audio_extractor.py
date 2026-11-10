@@ -4,6 +4,7 @@ Unit tests for audio extraction module.
 Tests extracted logic from subgen.py:1318-1350, 1352-1386, 1446-1490, 2016-2038
 """
 
+import shutil
 import subprocess
 import pytest
 from unittest.mock import Mock, patch, MagicMock
@@ -460,3 +461,65 @@ class TestExtractAudioTrackToFile:
 
             with pytest.raises(AudioExtractionError, match="no such file"):
                 extract_audio_track_to_file("/nonexistent.mkv", 0, "/tmp/out.wav")
+
+
+class TestExtractAudioTrackToFileIntegration:
+    """Real-ffmpeg integration tests (skipped when ffmpeg is unavailable).
+
+    Regression (PR #4 skeptical review, BLOCKER): the engine pre-creates the
+    destination via NamedTemporaryFile(delete=False), and this extractor ran
+    ffmpeg WITHOUT -y — ffmpeg showed the interactive "File already exists.
+    Overwrite? [y/N]" prompt, read EOF, and exited 1, failing EVERY
+    multi-track transcription. The unit tests all patch the extractor, so
+    only a real-ffmpeg run against a pre-created destination catches it.
+    """
+
+    @pytest.fixture
+    def two_track_mkv(self, tmp_path):
+        """A 1s MKV with two audio tracks (440Hz + 880Hz tones)."""
+        if shutil.which("ffmpeg") is None:
+            pytest.skip("system ffmpeg not available")
+        src = tmp_path / "two_track.mkv"
+        subprocess.run(
+            [
+                "ffmpeg",
+                "-y",
+                "-nostdin",
+                "-f", "lavfi", "-i", "sine=frequency=440:duration=1",
+                "-f", "lavfi", "-i", "sine=frequency=880:duration=1",
+                "-map", "0:a",
+                "-map", "1:a",
+                "-c:a", "aac",
+                str(src),
+            ],
+            check=True,
+            capture_output=True,
+        )
+        assert src.exists() and src.stat().st_size > 0
+        return str(src)
+
+    def test_extraction_overwrites_precreated_dest(self, two_track_mkv, tmp_path):
+        """Extraction onto an ALREADY-EXISTING destination must succeed.
+
+        This is the exact engine call shape: NamedTemporaryFile creates the
+        file first, then extraction writes over it. Without -y this fails.
+        """
+        from audio.extractor import extract_audio_track_to_file
+
+        dest = tmp_path / "precreated.wav"
+        dest.write_bytes(b"\x00" * 16)  # simulates NamedTemporaryFile's empty file
+        result = extract_audio_track_to_file(two_track_mkv, 0, str(dest))
+        assert result == str(dest)
+        data = dest.read_bytes()
+        assert data[:4] == b"RIFF", "destination was not overwritten with a real WAV"
+        assert len(data) > 44, "WAV has no samples"
+
+    def test_second_track_selection(self, two_track_mkv, tmp_path):
+        """Track index is honored (map 0:<index>) on a fresh destination."""
+        from audio.extractor import extract_audio_track_to_file
+
+        dest = tmp_path / "track1.wav"
+        extract_audio_track_to_file(two_track_mkv, 1, str(dest))
+        data = dest.read_bytes()
+        assert data[:4] == b"RIFF"
+        assert dest.stat().st_size > 44

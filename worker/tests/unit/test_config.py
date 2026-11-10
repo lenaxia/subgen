@@ -158,18 +158,23 @@ class TestWhisperConfig:
         assert config.device == "cpu"
 
     def test_device_cuda_available(self, monkeypatch):
-        """Test CUDA device when available."""
+        """Test CUDA device validation when available."""
 
-        # Mock torch.cuda.is_available()
+        # Mock torch.cuda.is_available() to return True
         class MockTorch:
             class cuda:
                 @staticmethod
                 def is_available():
                     return True
 
+        # monkeypatch.setitem restores the previous sys.modules entry (or
+        # deletes ours) after the test — a bare assignment leaks the mock to
+        # every later test in the process (e.g. real-model integration tests
+        # in test_model_manager.py fail with 'MockTorch' has no attribute
+        # 'Tensor').
         import sys
 
-        sys.modules["torch"] = MockTorch()
+        monkeypatch.setitem(sys.modules, "torch", MockTorch())
 
         config = WhisperConfig(device="cuda")
         assert config.device == "cuda"
@@ -186,7 +191,8 @@ class TestWhisperConfig:
 
         import sys
 
-        sys.modules["torch"] = MockTorch()
+        # monkeypatch.setitem restores sys.modules after the test (see above)
+        monkeypatch.setitem(sys.modules, "torch", MockTorch())
 
         with pytest.raises(ValidationError) as exc_info:
             WhisperConfig(device="cuda")
