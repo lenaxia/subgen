@@ -178,6 +178,10 @@ def has_subtitle_language(subtitles: List, language: str) -> bool:
     """
     Check if any subtitle matches the specified language.
 
+    Language codes are compared with full ISO 639 equivalence: "en" matches
+    "eng" and vice versa (via LanguageCode 1/2T/2B tables), so a scan that
+    reports 2-letter codes matches a 3-letter configured filter.
+
     Args:
         subtitles: List of ExternalSubtitle or EmbeddedSubtitle
         language: Language code to match (e.g., "eng", "en")
@@ -189,15 +193,35 @@ def has_subtitle_language(subtitles: List, language: str) -> bool:
         return False
 
     # Create list of equivalent language codes
-    equivalent_langs = [language.lower()]
-    if len(language) >= 3:
-        equivalent_langs.append(language[:3].lower())
+    equivalent_langs = {language.lower()}
+    try:
+        from language_code import LanguageCode
+
+        query = LanguageCode.from_string(language)
+        if query:
+            equivalent_langs.update(
+                code.lower()
+                for code in (query.iso_639_1, query.iso_639_2_t, query.iso_639_2_b)
+                if code
+            )
+    except Exception:
+        pass
 
     for sub in subtitles:
-        sub_lang = sub.language.lower()
-        if sub_lang in equivalent_langs or (
-            len(sub_lang) >= 3 and sub_lang[:3].lower() in equivalent_langs
-        ):
+        sub_langs = {sub.language.lower()}
+        try:
+            from language_code import LanguageCode
+
+            sub_code = LanguageCode.from_string(sub.language)
+            if sub_code:
+                sub_langs.update(
+                    code.lower()
+                    for code in (sub_code.iso_639_1, sub_code.iso_639_2_t, sub_code.iso_639_2_b)
+                    if code
+                )
+        except Exception:
+            pass
+        if sub_langs & equivalent_langs:
             return True
 
     return False

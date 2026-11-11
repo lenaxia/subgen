@@ -35,6 +35,23 @@ def restore_environment():
     os.environ.update(snapshot)
 
 
+# Mock heavy ML modules ONLY when they are not installed, so the suite can
+# run in a lean venv (~250MB) without torch/stable-ts (~2GB+). The modules
+# are always patch targets in unit tests; real-model work happens in
+# tests/integration, which skips itself via SUBGEN_MOCKED_ML when stubbed.
+_STUBBED_ML = []
+for _mod in ("stable_whisper", "torch"):
+    try:
+        __import__(_mod)
+    except ImportError:
+        sys.modules[_mod] = MagicMock()
+        _STUBBED_ML.append(_mod)
+if _STUBBED_ML:
+    # Evaluated at test-module import time (conftest imports first).
+    # restore_environment snapshots this AFTER it is set, so it persists.
+    os.environ["SUBGEN_MOCKED_ML"] = ",".join(_STUBBED_ML)
+
+
 @pytest.fixture
 def mock_config() -> MagicMock:
     """Mock configuration object mirroring the real nested settings shape."""

@@ -28,6 +28,10 @@ pytestmark = [
     pytest.mark.skipif(
         not os.path.exists(SPEECH_WAV), reason="test speech wav not present"
     ),
+    pytest.mark.skipif(
+        bool(os.environ.get("SUBGEN_MOCKED_ML")),
+        reason=f"ML modules stubbed in this venv ({os.environ.get('SUBGEN_MOCKED_ML')}); real-model E2E needs a full install",
+    ),
 ]
 
 

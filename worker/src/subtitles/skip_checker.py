@@ -189,7 +189,15 @@ class SkipChecker:
         return SkipResult(should_skip=False, reason=None, details="No matching embedded subtitles")
 
     def _check_external_subtitles(self, file_path: str) -> SkipResult:
-        """Check if external subtitles exist in target language."""
+        """Check if external subtitles exist (optionally language-filtered).
+
+        LEGACY BUG (found running the integration suite for the first time):
+        this read `skip_if_internal_subtitles_language` — the EMBEDDED
+        subtitle language, empty by default — as its match language, so with
+        default config has_subtitle_language(subs, "") was always False and
+        external-subtitle skip NEVER fired, even with a subtitle sitting
+        next to the file.
+        """
         logger.debug(f"_check_external_subtitles: checking {file_path}")
 
         try:
@@ -201,18 +209,28 @@ class SkipChecker:
             if self.config.skip.skip_only_subgen_subtitles:
                 external_subs = [s for s in external_subs if s.is_subgen_generated]
 
-            target_lang = self.config.skip.skip_if_internal_subtitles_language
-
-            if has_subtitle_language(external_subs, target_lang):
-                details = f"External subtitle found: language={target_lang}"
-                if self.config.skip.skip_only_subgen_subtitles:
-                    details += " (subgen-generated only)"
-
+            if not external_subs:
                 return SkipResult(
-                    should_skip=True,
-                    reason=SkipReason.EXTERNAL_SUBTITLE,
-                    details=details,
+                    should_skip=False, reason=None, details="No external subtitles"
                 )
+
+            # Optional language filter (SKIP_SUBTITLE_LANGUAGES); when unset,
+            # any external subtitle counts.
+            target_langs = self.config.skip.get_skip_subtitle_languages()
+            if target_langs and not any(
+                has_subtitle_language(external_subs, lang) for lang in target_langs
+            ):
+                return SkipResult(
+                    should_skip=False,
+                    reason=None,
+                    details=f"No external subtitles in languages {target_langs}",
+                )
+
+            return SkipResult(
+                should_skip=True,
+                reason=SkipReason.EXTERNAL_SUBTITLE,
+                details=f"External subtitle found: {external_subs[0].path}",
+            )
         except Exception as e:
             logger.debug(f"Error checking external subtitles: {e}")
 
