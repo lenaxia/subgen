@@ -27,6 +27,7 @@ RUN pip install --no-cache-dir --timeout=1000 -r requirements.txt
 
 # Copy application code, protobuf files, and shared modules
 COPY worker/src/ ./src/
+COPY worker/dispatcher_main.py ./
 COPY worker/pb/ ./pb/
 COPY language_code.py ./
 

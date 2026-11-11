@@ -313,7 +313,8 @@ class TranscriptionConfig(BaseSettings):
     asr_timeout: int = Field(
         default=18000,
         ge=60,
-        description="ASR timeout in seconds",
+        validation_alias=AliasChoices("WORKER_TIMEOUT"),
+        description="Seconds before an in-flight transcription is considered timed out",
     )
     custom_regroup: str = Field(
         default="cm_sl=84_sl=42++++++1",
@@ -509,6 +510,130 @@ class ModelLifecycleConfig(BaseSettings):
     )
 
 
+class DispatcherConfig(BaseSettings):
+    """Webhook dispatcher configuration (single-process mode).
+
+    Replaces the Go orchestrator: webhook listener + in-process queue +
+    in-process transcription. Same env var names as the Go orchestrator so
+    existing deploy environments keep working.
+    """
+
+    model_config = SettingsConfigDict(
+        env_prefix="",
+        env_file=".env",
+        env_file_encoding="utf-8",
+        case_sensitive=False,
+        extra="allow",
+        populate_by_name=True,
+    )
+
+    webhook_port: int = Field(
+        default=9000,
+        validation_alias=AliasChoices("WEBHOOK_PORT"),
+        ge=1,
+        le=65535,
+        description="HTTP port for the webhook listener",
+    )
+    process_added_media: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PROCESS_ADDED_MEDIA"),
+        description="Transcribe newly added media (Plex library.new, Jellyfin ItemAdded, Tautulli added)",
+    )
+    process_media_on_play: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("PROCESS_MEDIA_ON_PLAY"),
+        description="Transcribe media when playback starts",
+    )
+    plex_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("PLEX_ENABLED"),
+        description="Accept Plex webhooks and resolve file paths via the Plex API",
+    )
+    plex_server: str = Field(
+        default="http://192.168.1.111:32400",
+        validation_alias=AliasChoices("PLEX_SERVER"),
+        description="Plex server base URL",
+    )
+    plex_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("PLEX_TOKEN"),
+        description="Plex token (required when plex_enabled; used for path resolution and metadata refresh)",
+    )
+    jellyfin_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("JELLYFIN_ENABLED"),
+        description="Accept Jellyfin webhooks and resolve file paths via the Jellyfin API",
+    )
+    jellyfin_server: str = Field(
+        default="http://192.168.1.111:8096",
+        validation_alias=AliasChoices("JELLYFIN_SERVER"),
+        description="Jellyfin server base URL",
+    )
+    jellyfin_token: str = Field(
+        default="",
+        validation_alias=AliasChoices("JELLYFIN_TOKEN"),
+        description="Jellyfin API token (required when jellyfin_enabled)",
+    )
+    queue_max_size: int = Field(
+        default=1000,
+        validation_alias=AliasChoices("QUEUE_MAX_SIZE"),
+        ge=1,
+        description="Maximum queued tasks; new tasks are rejected with 429 beyond this",
+    )
+    queue_max_audio_content_size: int = Field(
+        default=100 * 1024 * 1024,
+        validation_alias=AliasChoices("QUEUE_MAX_AUDIO_CONTENT_SIZE"),
+        ge=1,
+        description="Maximum /asr audio upload size in bytes",
+    )
+    asr_timeout: int = Field(
+        default=300,
+        validation_alias=AliasChoices("ASR_TIMEOUT", "WEBHOOK_ASR_TIMEOUT"),
+        ge=1,
+        description="Seconds to wait for a blocking /asr request before returning 504",
+    )
+    monitor_enabled: bool = Field(
+        default=False,
+        validation_alias=AliasChoices("MONITOR", "MONITOR_ENABLED"),
+        description="Periodically rescan TRANSCRIBE_FOLDERS for media without subtitles",
+    )
+    transcribe_folders: str = Field(
+        default="",
+        validation_alias=AliasChoices("TRANSCRIBE_FOLDERS"),
+        description="Pipe-separated folders to monitor/scan",
+    )
+    scan_on_startup: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("SCAN_ON_STARTUP"),
+        description="Scan transcribe_folders once at startup",
+    )
+    monitor_interval: int = Field(
+        default=3600,
+        validation_alias=AliasChoices("MONITOR_INTERVAL"),
+        ge=10,
+        description="Seconds between monitor rescan passes",
+    )
+    batch_scan_limit: int = Field(
+        default=1000,
+        validation_alias=AliasChoices("BATCH_SCAN_LIMIT"),
+        ge=0,
+        description="Maximum files per scan pass (0 = unlimited)",
+    )
+    metadata_refresh: bool = Field(
+        default=True,
+        validation_alias=AliasChoices("METADATA_REFRESH"),
+        description="Ask Plex/Jellyfin to refresh metadata after a successful transcription",
+    )
+
+    @model_validator(mode="after")
+    def validate_dispatcher_config(self) -> "DispatcherConfig":
+        if self.plex_enabled and not self.plex_token:
+            raise ValueError("PLEX_TOKEN is required when PLEX_ENABLED=true")
+        if self.jellyfin_enabled and not self.jellyfin_token:
+            raise ValueError("JELLYFIN_TOKEN is required when JELLYFIN_ENABLED=true")
+        return self
+
+
 class WorkerSettings(BaseSettings):
     """Master configuration for Python transcription worker."""
 
@@ -535,6 +660,7 @@ class WorkerSettings(BaseSettings):
     subtitle: SubtitleConfig = Field(default_factory=SubtitleConfig)
     skip: SkipConfig = Field(default_factory=SkipConfig)
     model_lifecycle: ModelLifecycleConfig = Field(default_factory=ModelLifecycleConfig)
+    dispatcher: DispatcherConfig = Field(default_factory=DispatcherConfig)
 
     def to_yaml(self, file_path: Path) -> None:
         """Save configuration to YAML file."""

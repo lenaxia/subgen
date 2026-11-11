@@ -2,6 +2,7 @@
 pytest configuration and fixtures for worker tests.
 """
 
+import os
 import sys
 from pathlib import Path
 import pytest
@@ -15,6 +16,40 @@ sys.path.insert(0, str(worker_dir))
 # pb/transcription_pb2_grpc.py uses a flat `import transcription_pb2`
 # (matches the container's PYTHONPATH=/app/src:/app:/app/pb)
 sys.path.insert(0, str(worker_dir / "pb"))
+
+
+@pytest.fixture(autouse=True)
+def restore_environment():
+    """Snapshot and restore os.environ around every test.
+
+    load_config(env_file=...) uses python-dotenv's override=True, which
+    permanently injects the .env values into os.environ. Without this
+    fixture one config test's .env (WHISPER_MODEL=small,
+    PROCESS_ADDED_MEDIA=false, ...) leaks into every later test in the
+    process — same failure class as the sys.modules pollution fixed
+    earlier.
+    """
+    snapshot = dict(os.environ)
+    yield
+    os.environ.clear()
+    os.environ.update(snapshot)
+
+
+# Mock heavy ML modules ONLY when they are not installed, so the suite can
+# run in a lean venv (~250MB) without torch/stable-ts (~2GB+). The modules
+# are always patch targets in unit tests; real-model work happens in
+# tests/integration, which skips itself via SUBGEN_MOCKED_ML when stubbed.
+_STUBBED_ML = []
+for _mod in ("stable_whisper", "torch"):
+    try:
+        __import__(_mod)
+    except ImportError:
+        sys.modules[_mod] = MagicMock()
+        _STUBBED_ML.append(_mod)
+if _STUBBED_ML:
+    # Evaluated at test-module import time (conftest imports first).
+    # restore_environment snapshots this AFTER it is set, so it persists.
+    os.environ["SUBGEN_MOCKED_ML"] = ",".join(_STUBBED_ML)
 
 
 @pytest.fixture

@@ -615,3 +615,37 @@ docker exec subgen-orchestrator env | grep -E "(PLEX|JELLYFIN|WHISPER|SKIP)"
 **Last Updated**: 2026-02-21  
 **Version**: v0.2.18  
 **Status**: Production Ready ✅
+---
+
+## 🚀 Single-Process Dispatcher Mode
+
+`worker/dispatcher_main.py` replaces the Go orchestrator + gRPC worker pair with ONE process: webhook listener + in-process queue + in-process transcription. Recommended when consistency matters more than throughput (one replica, idempotent jobs).
+
+| Variable | Default | Description |
+|----------|---------|-------------|
+| `WEBHOOK_PORT` | `9000` | Webhook listener port (endpoints: `/plex`, `/jellyfin`, `/emby`, `/tautulli`, `/asr`, `/batch`, `/detect-language`, `/queue/status`, `/health`, `/ready`) |
+| `PLEX_ENABLED` / `PLEX_SERVER` / `PLEX_TOKEN` | false / upstream default / `""` | Plex webhook source (token required when enabled) |
+| `JELLYFIN_ENABLED` / `JELLYFIN_SERVER` / `JELLYFIN_TOKEN` | false / upstream default / `""` | Jellyfin webhook source (token required when enabled) |
+| `PROCESS_ADDED_MEDIA` | `true` | Transcribe newly-added media events |
+| `PROCESS_MEDIA_ON_PLAY` | `true` | Transcribe on playback-start events |
+| `QUEUE_MAX_SIZE` | `1000` | Max queued tasks; overflow rejected with 429 |
+| `QUEUE_MAX_AUDIO_CONTENT_SIZE` | `100MB` | `/asr` upload cap |
+| `ASR_TIMEOUT` | `300` | Blocking `/asr` wait before 504 |
+| `MONITOR` | `false` | Periodic rescan of `TRANSCRIBE_FOLDERS` (at-least-once recovery) |
+| `TRANSCRIBE_FOLDERS` | `""` | Pipe-separated folders to monitor |
+| `SCAN_ON_STARTUP` | `true` | Scan monitored folders once at startup |
+| `MONITOR_INTERVAL` | `3600` | Seconds between rescans |
+| `BATCH_SCAN_LIMIT` | `1000` | Max files per scan pass (0 = unlimited) |
+| `METADATA_REFRESH` | `true` | Plex/Jellyfin metadata refresh after success |
+| `QUEUE_STATE_PATH` | `/tmp/subgen-queue-state.json` | Queue persistence file (queued jobs survive restarts) |
+
+Behavior notes:
+- Failed jobs are **requeued up to 3 attempts** (the Go orchestrator dropped them); workers are idempotent (skip-if-subtitle-exists) so retries are safe.
+- In-flight tasks interrupted by a restart are **recovered and requeued** on next startup (at-least-once).
+- Blocking `/asr` tasks are never retried (after a timeout the caller is gone).
+- `ASR_TIMEOUT` (default 300) is the blocking `/asr` wait. `WORKER_TIMEOUT` (default 18000) is the transcription timeout — the Go orchestrator's `ASR_TIMEOUT` name was previously shared with the 18000s worker timeout; the dispatcher splits them.
+- Known gap vs the Go orchestrator: Plex episode queueing (`PLEX_QUEUE_NEXT_EPISODE` / `_SEASON` / `_SERIES`) is not yet ported — those env vars are ignored in dispatcher mode.
+- In-flight tasks interrupted by a restart are recovered and requeued on next startup (at-least-once).
+- Queue state persists to JSON; `/asr` audio uploads are not persisted (re-post after a restart).
+- Monitor scans skip files that already have a subtitle beside them.
+- Manifest: `kubernetes/dispatcher.yaml` (Deployment replicas=1, Recreate strategy).
