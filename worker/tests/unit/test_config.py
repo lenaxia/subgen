@@ -673,3 +673,57 @@ class TestDeployEnvAliases:
         """The original NAMESUBLANG alias must keep working."""
         monkeypatch.setenv("NAMESUBLANG", "aa")
         assert SubtitleConfig().custom_language_name == "aa"
+
+
+class TestDispatcherConfig:
+    """Dispatcher (single-process orchestrator replacement) configuration."""
+
+    def test_defaults_construct(self):
+        from config.settings import DispatcherConfig
+
+        d = DispatcherConfig()
+        assert d.webhook_port == 9000
+        assert d.queue_max_size == 1000
+        assert d.plex_enabled is False  # safe default: no token needed
+        assert d.jellyfin_enabled is False
+        assert d.monitor_enabled is False
+        assert d.scan_on_startup is True
+        assert d.metadata_refresh is True
+
+    def test_worker_settings_includes_dispatcher(self):
+        config = WorkerSettings()
+        assert config.dispatcher is not None
+        assert config.dispatcher.webhook_port == 9000
+
+    def test_plex_enabled_requires_token(self):
+        from config.settings import DispatcherConfig
+
+        with pytest.raises(ValidationError):
+            DispatcherConfig(plex_enabled=True, plex_token="")
+
+    def test_jellyfin_enabled_requires_token(self):
+        from config.settings import DispatcherConfig
+
+        with pytest.raises(ValidationError):
+            DispatcherConfig(jellyfin_enabled=True, jellyfin_token="")
+
+    def test_env_aliases(self, monkeypatch):
+        from config.settings import DispatcherConfig
+
+        monkeypatch.setenv("WEBHOOK_PORT", "9100")
+        monkeypatch.setenv("QUEUE_MAX_SIZE", "500")
+        monkeypatch.setenv("MONITOR_INTERVAL", "60")
+        monkeypatch.setenv("ASR_TIMEOUT", "60")
+        d = DispatcherConfig()
+        assert d.webhook_port == 9100
+        assert d.queue_max_size == 500
+        assert d.monitor_interval == 60
+        assert d.asr_timeout == 60
+
+    def test_webhook_port_bounds(self):
+        from config.settings import DispatcherConfig
+
+        with pytest.raises(ValidationError):
+            DispatcherConfig(webhook_port=0)
+        with pytest.raises(ValidationError):
+            DispatcherConfig(webhook_port=70000)

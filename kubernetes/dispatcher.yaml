@@ -1,0 +1,130 @@
+---
+# Single-process subgen dispatcher: webhook listener + queue + transcription
+# in ONE container. Replaces the orchestrator + gRPC worker pair for
+# consistency-first deployments (scale=1 is the intended posture; the worker
+# is idempotent, so accidental replicas converge via skip-if-exists).
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: subgen-dispatcher-config
+  labels:
+    app: subgen-dispatcher
+data:
+  WHISPER_MODEL: "medium"
+  TRANSCRIBE_DEVICE: "cpu"
+  COMPUTE_TYPE: "auto"
+  MODEL_CLEANUP_DELAY: "30"
+  UNLOAD_MODEL_ON_IDLE: "" # auto: CPU keeps the model resident
+  LOG_FORMAT: "json"
+
+  # Webhook sources
+  PLEX_ENABLED: "true"
+  PLEX_SERVER: "http://192.168.1.111:32400"
+  # PLEX_TOKEN comes from the secret
+  PROCESS_ADDED_MEDIA: "true"
+  PROCESS_MEDIA_ON_PLAY: "true"
+
+  # Monitoring: periodic rescan makes delivery at-least-once even if a job
+  # is lost (the consistency property that replaces the Go orchestrator's
+  # routing machinery)
+  MONITOR: "true"
+  TRANSCRIBE_FOLDERS: "/media/movies|/media/tv"
+  SCAN_ON_STARTUP: "true"
+  MONITOR_INTERVAL: "3600"
+
+  # Queue persistence (survives pod restarts)
+  QUEUE_STATE_PATH: "/config/queue-state.json"
+  QUEUE_MAX_SIZE: "1000"
+---
+apiVersion: v1
+kind: Secret
+metadata:
+  name: subgen-dispatcher-secrets
+  labels:
+    app: subgen-dispatcher
+type: Opaque
+stringData:
+  PLEX_TOKEN: "REPLACE_ME"
+---
+apiVersion: apps/v1
+kind: Deployment
+metadata:
+  name: subgen-dispatcher
+  labels:
+    app: subgen-dispatcher
+spec:
+  # One replica by design: consistency over throughput. The dispatcher is
+  # idempotent (skip-if-subtitle-exists + queue dedup), so a stray second
+  # replica is harmless but pointless.
+  replicas: 1
+  strategy:
+    type: Recreate # avoid two dispatchers fighting over the queue state file
+  selector:
+    matchLabels:
+      app: subgen-dispatcher
+  template:
+    metadata:
+      labels:
+        app: subgen-dispatcher
+    spec:
+      containers:
+        - name: dispatcher
+          image: ghcr.io/lenaxia/subgen-worker:latest
+          command: ["python", "dispatcher_main.py"]
+          ports:
+            - containerPort: 9000
+              name: webhook
+          envFrom:
+            - configMapRef:
+                name: subgen-dispatcher-config
+            - secretRef:
+                name: subgen-dispatcher-secrets
+          volumeMounts:
+            - name: media
+              mountPath: /media
+            - name: models
+              mountPath: /models
+            - name: config
+              mountPath: /config
+          readinessProbe:
+            httpGet:
+              path: /ready
+              port: webhook
+            initialDelaySeconds: 10
+            periodSeconds: 15
+          livenessProbe:
+            httpGet:
+              path: /health
+              port: webhook
+            initialDelaySeconds: 20
+            periodSeconds: 30
+          resources:
+            requests:
+              memory: "2Gi"
+              cpu: "1"
+            limits:
+              memory: "6Gi"
+      volumes:
+        - name: media
+          persistentVolumeClaim:
+            claimName: subgen-media
+        - name: models
+          persistentVolumeClaim:
+            claimName: subgen-models
+        - name: config
+          persistentVolumeClaim:
+            claimName: subgen-config
+---
+apiVersion: v1
+kind: Service
+metadata:
+  name: subgen-dispatcher
+  labels:
+    app: subgen-dispatcher
+spec:
+  selector:
+    app: subgen-dispatcher
+  ports:
+    - port: 9000
+      targetPort: webhook
+      name: webhook
