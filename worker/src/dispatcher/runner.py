@@ -118,7 +118,8 @@ class Dispatcher:
                 # process() handles its own failure policy; this is a
                 # last-resort guard so the loop itself can never die.
                 logger.exception("Unexpected dispatcher error on task %s", task.id[:12])
-                self.queue.remove_processing(task)
+                # Record the failure: dropping silently would hide the loss
+                self.queue.mark_failed(task, f"unexpected dispatcher error: {e}")
                 self._deliver_result(task, {"success": False, "error": str(e)})
 
     def process(self, task: Task) -> None:
@@ -240,9 +241,16 @@ class Dispatcher:
     # -- failure policy ------------------------------------------------------
 
     def _fail_or_requeue(self, task: Task, error: str) -> None:
-        """Requeue-not-delete: retry up to max_attempts, then fail for good."""
+        """Requeue-not-delete: retry up to max_attempts, then fail for good.
+
+        Blocking /asr tasks are exempt from retries: after a 504 the caller
+        is gone, so re-running the job would only burn CPU with no reader.
+        """
         self._deliver_result(task, {"success": False, "error": error})
-        if task.attempts < self.max_attempts:
+        if task.result_queue is not None:
+            logger.error("ASR task %s failed: %s", task.id[:12], error)
+            self.queue.mark_failed(task, error)
+        elif task.attempts < self.max_attempts:
             self.queue.requeue(task)
         else:
             logger.error(
@@ -354,7 +362,8 @@ class Dispatcher:
         stem = os.path.basename(base)
         try:
             for name in os.listdir(directory):
-                if name.startswith(stem) and ".subgen." in name:
+                # "." guard: "movie.mkv" must not match "movie2.thing.subgen.srt"
+                if name.startswith(stem + ".") and ".subgen." in name:
                     return True
         except OSError:
             pass

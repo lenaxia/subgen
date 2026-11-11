@@ -147,14 +147,28 @@ class WebhookServer:
         app.add_url_rule("/emby", "emby", self.handle_emby, methods=["POST"])
         app.add_url_rule("/webhook/emby", "emby_alt", self.handle_emby, methods=["POST"])
         app.add_url_rule("/tautulli", "tautulli", self.handle_tautulli, methods=["POST"])
+        app.add_url_rule(
+            "/webhook/tautulli", "tautulli_alt", self.handle_tautulli, methods=["POST"]
+        )
         app.add_url_rule("/asr", "asr", self.handle_asr, methods=["POST"])
         app.add_url_rule(
             "/detect-language", "detect_language", self.handle_detect_language, methods=["POST"]
         )
         app.add_url_rule("/batch", "batch", self.handle_batch, methods=["POST"])
         app.add_url_rule("/queue/status", "queue_status", self.handle_queue_status, methods=["GET"])
+        app.add_url_rule(
+            "/queue/processing", "queue_processing", self.handle_queue_processing, methods=["GET"]
+        )
+        app.add_url_rule(
+            "/queue/history", "queue_history", self.handle_queue_history, methods=["GET"]
+        )
+        app.add_url_rule("/tasks/<task_id>", "task_info", self.handle_task_info, methods=["GET"])
         app.add_url_rule("/health", "health", self.handle_health, methods=["GET"])
+        app.add_url_rule("/healthz", "healthz", self.handle_health, methods=["GET"])
         app.add_url_rule("/ready", "ready", self.handle_ready, methods=["GET"])
+        app.add_url_rule("/readyz", "readyz", self.handle_ready, methods=["GET"])
+        app.add_url_rule("/live", "live", self.handle_live, methods=["GET"])
+        app.add_url_rule("/livez", "livez", self.handle_live, methods=["GET"])
 
     # -- simple endpoints ----------------------------------------------------
 
@@ -177,6 +191,8 @@ class WebhookServer:
     def handle_ready(self):
         if self.dispatcher is None:
             return jsonify({"status": "error", "error": "dispatcher_not_initialized"}), 503
+        if self.queue.size() > 10000:
+            return jsonify({"status": "error", "error": "queue_overloaded"}), 503
         return jsonify(
             {
                 "status": "ready",
@@ -184,6 +200,33 @@ class WebhookServer:
                 "workers_available": 1,
             }
         )
+
+    def handle_live(self):
+        return jsonify(
+            {"status": "alive", "uptime_seconds": int(time.time() - self.started_at),
+             "timestamp": int(time.time())}
+        )
+
+    def handle_queue_processing(self):
+        with self.queue._lock:
+            processing = [t.to_persisted() for t in self.queue._processing.values()]
+        return jsonify({"processing": len(processing), "tasks": processing})
+
+    def handle_queue_history(self):
+        return jsonify({"history": self.queue.history()})
+
+    def handle_task_info(self, task_id: str):
+        for entry in reversed(self.queue.history()):
+            if entry.get("task", {}).get("id") == task_id:
+                return jsonify(entry)
+        with self.queue._lock:
+            for t in self.queue._processing.values():
+                if t.id == task_id:
+                    return jsonify({"task": t.to_persisted(), "status": "processing"})
+            for t in self.queue._queued.values():
+                if t.id == task_id:
+                    return jsonify({"task": t.to_persisted(), "status": "queued"})
+        return jsonify({"error": "task not found"}), 404
 
     def handle_queue_status(self):
         return jsonify(
@@ -201,7 +244,7 @@ class WebhookServer:
         ua = request.headers.get("User-Agent", "")
         if "PlexMediaServer" not in ua:
             return jsonify(
-                {"error": "This doesn't appear to be a properly configured Plex webhook"}
+                {"error": "This doesn't appear to be a properly configured Plex webhook, please review the instructions again"}
             ), 400
         payload_raw = request.form.get("payload")
         if not payload_raw:
@@ -209,6 +252,8 @@ class WebhookServer:
         try:
             payload = json.loads(payload_raw)
         except (ValueError, TypeError):
+            return jsonify({"error": "Invalid JSON payload"}), 400
+        if not isinstance(payload, dict):
             return jsonify({"error": "Invalid JSON payload"}), 400
 
         event = payload.get("event", "")
@@ -220,12 +265,15 @@ class WebhookServer:
         if event not in ("library.new", "media.play"):
             return Response("", status=200)
 
-        metadata = payload.get("Metadata", {}) or {}
-        rating_key = str(metadata.get("ratingKey", "") or "")
-        if not rating_key:
-            return jsonify({"error": "Missing ratingKey in metadata"}), 400
-        if not d.plex_enabled:
-            return jsonify({"error": "Plex support is disabled (PLEX_ENABLED=false)"}), 400
+        metadata = payload.get("Metadata", {})
+        if not isinstance(metadata, dict):
+            return jsonify({"error": "Invalid JSON payload"}), 400
+        rating_key = metadata.get("ratingKey", "")
+        # Go unmarshals ratingKey into a string field: non-string -> invalid payload
+        if not isinstance(rating_key, str) or not rating_key:
+            if rating_key == "":
+                return jsonify({"error": "Missing ratingKey in metadata"}), 400
+            return jsonify({"error": "Invalid JSON payload"}), 400
 
         task = Task(
             task_type="transcribe",
@@ -241,7 +289,7 @@ class WebhookServer:
         ua = request.headers.get("User-Agent", "")
         if "Jellyfin-Server" not in ua:
             return jsonify(
-                {"error": "This doesn't appear to be a properly configured Jellyfin webhook"}
+                {"error": "This doesn't appear to be a properly configured Jellyfin webhook, please review the instructions again"}
             ), 400
         notification_type = request.form.get("NotificationType", "")
         item_id = request.form.get("ItemId", "")
@@ -255,10 +303,6 @@ class WebhookServer:
             return Response("", status=200)
         if notification_type not in ("ItemAdded", "PlaybackStart"):
             return Response("", status=200)
-        if not d.jellyfin_enabled:
-            return jsonify(
-                {"error": "Jellyfin support is disabled (JELLYFIN_ENABLED=false)"}
-            ), 400
 
         task = Task(
             task_type="transcribe",
@@ -278,6 +322,8 @@ class WebhookServer:
             payload = json.loads(data_raw)
         except (ValueError, TypeError):
             return jsonify({"error": "Invalid JSON payload"}), 400
+        if not isinstance(payload, dict):
+            return jsonify({"error": "Invalid JSON payload"}), 400
 
         event = payload.get("Event", "")
         d = self.config.dispatcher
@@ -290,7 +336,10 @@ class WebhookServer:
         if event not in ("library.new", "playback.start"):
             return Response("", status=200)
 
-        item_path = (payload.get("Item", {}) or {}).get("Path", "")
+        item = payload.get("Item", {})
+        if not isinstance(item, dict):
+            return jsonify({"error": "Invalid JSON payload"}), 400
+        item_path = item.get("Path", "")
         if not item_path:
             return jsonify({"error": "Missing file path in Item"}), 400
         try:
@@ -307,7 +356,7 @@ class WebhookServer:
     def handle_tautulli(self):
         if request.headers.get("source", "") != "Tautulli":
             return jsonify(
-                {"error": "This doesn't appear to be a properly configured Tautulli webhook"}
+                {"error": "This doesn't appear to be a properly configured Tautulli webhook, please review the instructions again"}
             ), 400
         event = request.form.get("event", "")
         file_path = request.form.get("file", "")
@@ -351,9 +400,9 @@ class WebhookServer:
         content = audio_file.read()
         max_size = self.config.dispatcher.queue_max_audio_content_size
         if len(content) > max_size:
-            return jsonify({"error": "Audio file too large"}), 413
+            return jsonify({"error": f"Audio file exceeds maximum size of {max_size} bytes"}), 413
         if len(content) == 0:
-            return jsonify({"error": "Empty audio file"}), 400
+            return jsonify({"error": "Audio file is empty"}), 400
 
         asr_options = {
             "output": output,
@@ -389,10 +438,12 @@ class WebhookServer:
         try:
             result = result_queue.get(timeout=timeout)
         except queue_mod.Empty:
-            return jsonify({"error": "ASR task timed out"}), 504
+            return jsonify({"error": f"transcription timeout after {timeout}s"}), 504
 
         if not result.get("success"):
-            return jsonify({"error": result.get("error", "transcription failed")}), 500
+            return jsonify(
+                {"error": f"transcription failed: {result.get('error', 'unknown')}"}
+            ), 500
 
         body = format_segments(result.get("segments"), output)
         mime = {

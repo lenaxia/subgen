@@ -18,6 +18,7 @@ RUN pip install --no-cache-dir -r requirements-no-av.txt
 
 # Copy application code
 COPY worker/src/ ./src/
+COPY worker/dispatcher_main.py ./
 COPY worker/pb/ ./pb/
 COPY language_code.py ./
 

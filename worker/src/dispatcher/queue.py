@@ -322,9 +322,25 @@ class TaskQueue:
             logger.warning("Queue persistence unreadable, starting empty: %s", e)
             return
         for data in snapshot.get("processing", []):
+            # The worker that owned this task is gone (restart while it was
+            # mid-job). Restoring it as "processing" would orphan it forever:
+            # nothing dequeues from the processing dict, re-enqueueing the
+            # same file would be rejected as duplicate, and is_idle() would
+            # never go True. Recovery: put it back on the queue — the task's
+            # attempts count is preserved, and workers are idempotent
+            # (skip-if-subtitle-exists), so a redone job is safe.
             task = Task.from_persisted(data)
-            task.started_at = time.time()
-            self._processing[task.id] = task
+            task.started_at = 0.0
+            if task.id in self._queued:
+                continue
+            self._queued[task.id] = task
+            self._seq += 1
+            heapq.heappush(self._heap, (task.priority, task.queued_at, self._seq, task.id))
+            logger.warning(
+                "Recovered in-flight task %s from previous run (attempt %d); requeued",
+                task.id[:12],
+                task.attempts,
+            )
         for data in snapshot.get("queued", []):
             task = Task.from_persisted(data)
             if task.id in self._queued or task.id in self._processing:

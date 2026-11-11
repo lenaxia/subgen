@@ -161,12 +161,15 @@ class TestPersistence:
         processing = q1.dequeue()
 
         q2 = TaskQueue(max_size=10, persist_path=path)
-        assert q2.size() == 1
-        assert q2.processing_size() == 1
-        restored = q2.dequeue()
-        # /a.mkv was processing when snapshotted; /b.mkv was queued
-        assert restored.file_path == "/b.mkv"
-        assert processing.file_path == "/a.mkv"
+        # Regression (PR #5 review blocker): a task that was mid-flight when
+        # the process died must be RECOVERED into the queue, never restored
+        # as an orphaned "processing" entry that nothing can ever dequeue.
+        assert q2.processing_size() == 0, "restored processing tasks would be orphaned"
+        assert q2.size() == 2
+        first = q2.dequeue()
+        second = q2.dequeue()
+        assert {first.file_path, second.file_path} == {"/a.mkv", "/b.mkv"}
+        assert processing.attempts == first.attempts if first.file_path == "/a.mkv" else True
 
     def test_no_file_starts_empty(self, tmp_path):
         q = TaskQueue(max_size=10, persist_path=str(tmp_path / "missing.json"))

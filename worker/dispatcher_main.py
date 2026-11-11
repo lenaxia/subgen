@@ -65,9 +65,15 @@ def main() -> None:
     dispatcher.start()
 
     def shutdown(_sig=None, _frame=None):
-        logger.info("Shutdown signal received; draining dispatcher")
-        dispatcher.stop()
-        sys.exit(0)
+        # NOTE: we deliberately do NOT join the worker thread or run normal
+        # interpreter teardown here. If a ctranslate2 transcription is
+        # mid-flight, joining + interpreter finalization segfaults (exit 139,
+        # reproduced under review). Instead: stop scheduling, and hard-exit.
+        # Any task still in flight is persisted in the queue state file and
+        # recovered (requeued) on next start — at-least-once delivery.
+        logger.info("Shutdown signal received; stopping dispatcher")
+        dispatcher._stop.set()
+        os._exit(0)
 
     signal.signal(signal.SIGTERM, shutdown)
     signal.signal(signal.SIGINT, shutdown)

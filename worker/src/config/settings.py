@@ -313,7 +313,8 @@ class TranscriptionConfig(BaseSettings):
     asr_timeout: int = Field(
         default=18000,
         ge=60,
-        description="ASR timeout in seconds",
+        validation_alias=AliasChoices("WORKER_TIMEOUT"),
+        description="Seconds before an in-flight transcription is considered timed out",
     )
     custom_regroup: str = Field(
         default="cm_sl=84_sl=42++++++1",

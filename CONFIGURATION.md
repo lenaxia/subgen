@@ -641,6 +641,11 @@ docker exec subgen-orchestrator env | grep -E "(PLEX|JELLYFIN|WHISPER|SKIP)"
 
 Behavior notes:
 - Failed jobs are **requeued up to 3 attempts** (the Go orchestrator dropped them); workers are idempotent (skip-if-subtitle-exists) so retries are safe.
+- In-flight tasks interrupted by a restart are **recovered and requeued** on next startup (at-least-once).
+- Blocking `/asr` tasks are never retried (after a timeout the caller is gone).
+- `ASR_TIMEOUT` (default 300) is the blocking `/asr` wait. `WORKER_TIMEOUT` (default 18000) is the transcription timeout — the Go orchestrator's `ASR_TIMEOUT` name was previously shared with the 18000s worker timeout; the dispatcher splits them.
+- Known gap vs the Go orchestrator: Plex episode queueing (`PLEX_QUEUE_NEXT_EPISODE` / `_SEASON` / `_SERIES`) is not yet ported — those env vars are ignored in dispatcher mode.
+- In-flight tasks interrupted by a restart are recovered and requeued on next startup (at-least-once).
 - Queue state persists to JSON; `/asr` audio uploads are not persisted (re-post after a restart).
 - Monitor scans skip files that already have a subtitle beside them.
 - Manifest: `kubernetes/dispatcher.yaml` (Deployment replicas=1, Recreate strategy).

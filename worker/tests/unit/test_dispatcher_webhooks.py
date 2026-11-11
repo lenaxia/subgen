@@ -340,3 +340,113 @@ class TestFormatSegments:
         assert "Hello world\nSecond line" == format_segments(self.SEGS, "txt")
         assert "0.000\t2.500\tHello world" in format_segments(self.SEGS, "tsv")
         assert "[00:00.00]Hello world" in format_segments(self.SEGS, "lrc")
+
+
+# -- Review-fix regressions (PR #5 skeptical review) ---------------------------
+
+
+class TestParityFixes:
+    def test_non_dict_plex_payload_rejected(self, ctx):
+        server, q, _ = ctx
+        headers = {"User-Agent": "PlexMediaServer/1.0"}
+        for bad in ("[]", "null", '"s"', "42"):
+            resp = server.app.test_client().post(
+                "/plex", data={"payload": bad}, headers=headers
+            )
+            assert resp.status_code == 400, f"payload={bad}"
+            assert b"Invalid JSON payload" in resp.data
+        assert q.size() == 0
+
+    def test_non_dict_emby_data_rejected(self, ctx):
+        server, q, _ = ctx
+        for bad in ("3", '"s"', "[]"):
+            resp = server.app.test_client().post(
+                "/emby", data=f"data={bad}", content_type="application/x-www-form-urlencoded"
+            )
+            assert resp.status_code == 400, f"data={bad}"
+        assert q.size() == 0
+
+    def test_scalar_metadata_rejected(self, ctx):
+        server, q, _ = ctx
+        resp = server.app.test_client().post(
+            "/plex",
+            data={"payload": '{"event":"library.new","Metadata":"oops"}'},
+            headers={"User-Agent": "PlexMediaServer/1.0"},
+        )
+        assert resp.status_code == 400
+        assert b"Invalid JSON payload" in resp.data
+
+    def test_int_rating_key_rejected_like_go(self, ctx):
+        server, q, _ = ctx
+        resp = server.app.test_client().post(
+            "/plex",
+            data={"payload": '{"event":"library.new","Metadata":{"ratingKey":12345}}'},
+            headers={"User-Agent": "PlexMediaServer/1.0"},
+        )
+        assert resp.status_code == 400
+        assert b"Invalid JSON payload" in resp.data
+
+    def test_webhook_tautulli_route_registered(self, ctx):
+        server, q, _ = ctx
+        resp = server.app.test_client().post(
+            "/webhook/tautulli",
+            data="event=added&file=/media/x.mkv",
+            headers={"source": "Tautulli", "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert resp.status_code == 200
+        assert q.size() == 1
+
+    def test_no_enabled_gate_parity(self, ctx):
+        """Go has no *_ENABLED gate on webhook ingestion — tasks enqueue and
+        path resolution fails at dispatch. Ports must not 400."""
+        server, q, _ = ctx
+        server.config.dispatcher.plex_enabled = False
+        server.config.dispatcher.jellyfin_enabled = False
+        data, headers = plex_form("library.new", "1")
+        assert server.app.test_client().post("/plex", data=data, headers=headers).status_code == 200
+        assert (
+            server.app.test_client().post("/jellyfin", data=JELLYFIN_ADDED, headers=JF_HEADERS).status_code
+            == 200
+        )
+        assert q.size() == 2
+
+    def test_go_error_strings_exact(self, ctx):
+        server, _, _ = ctx
+        client = server.app.test_client()
+        resp = client.post("/plex", data={}, headers={"User-Agent": "curl"})
+        assert resp.json["error"] == (
+            "This doesn't appear to be a properly configured Plex webhook, "
+            "please review the instructions again"
+        )
+        resp = client.post(
+            "/jellyfin", data="NotificationType=ItemAdded", headers={"User-Agent": "curl"}
+        )
+        assert "please review the instructions again" in resp.json["error"]
+        resp = client.post(
+            "/tautulli",
+            data="event=added&file=/x.mkv",
+            headers={"source": "Other", "Content-Type": "application/x-www-form-urlencoded"},
+        )
+        assert "please review the instructions again" in resp.json["error"]
+
+    def test_probe_aliases(self, ctx):
+        server, _, _ = ctx
+        client = server.app.test_client()
+        assert client.get("/healthz").json["status"] == "alive"
+        assert client.get("/readyz").json["status"] == "ready"
+        assert client.get("/live").json["status"] == "alive"
+        assert "uptime_seconds" in client.get("/livez").json
+
+    def test_queue_processing_and_history_endpoints(self, ctx):
+        server, q, _ = ctx
+        q.enqueue(Task(file_path="/a.mkv"))
+        client = server.app.test_client()
+        assert client.get("/queue/processing").json["processing"] == 0
+        t = q.dequeue()
+        assert client.get("/queue/processing").json["processing"] == 1
+        q.mark_done(t)
+        history = client.get("/queue/history").json["history"]
+        assert history[-1]["status"] == "done"
+        task_id = history[-1]["task"]["id"]
+        assert client.get(f"/tasks/{task_id}").json["status"] == "done"
+        assert client.get("/tasks/does-not-exist").status_code == 404

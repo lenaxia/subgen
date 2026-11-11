@@ -1,6 +1,7 @@
 """Unit tests for the dispatcher runner (worker loop, failure policy, monitor)."""
 
 import queue as queue_mod
+import time
 from unittest.mock import MagicMock, Mock, patch
 
 import pytest
@@ -274,3 +275,57 @@ class TestFakeContext:
             ctx.abort(grpc.StatusCode.NOT_FOUND, "nope")
         assert exc.value.status_code == grpc.StatusCode.NOT_FOUND
         assert exc.value.details == "nope"
+
+
+# -- Review-fix regressions (PR #5 skeptical review) ---------------------------
+
+
+class TestASRFailurePolicy:
+    def test_asr_tasks_never_requeue(self):
+        """After a 504 the caller is gone; retrying an /asr task is pure waste."""
+        d = make_dispatcher()
+        d.servicer.transcribe_response = transcribe_response(success=False, error="model exploded")
+        rq = queue_mod.Queue(maxsize=1)
+        task = Task(task_type="asr", audio_content=b"audio", result_queue=rq)
+        d.queue.enqueue(task)
+        d.process(d.queue.dequeue())
+        assert d.queue.is_idle(), "ASR task must not be requeued"
+        assert d.queue.history()[-1]["status"] == "failed"
+
+
+class TestSubtitlePrefixFalsePositive:
+    def test_movie_does_not_match_movie2_subgen_srt(self, tmp_path):
+        """Regression: 'movie.mkv' was skipped when 'movie2.thing.subgen.srt'
+        existed (startswith(stem) matched the longer name)."""
+        d = make_dispatcher(config=make_config(batch_scan_limit=0))
+        (tmp_path / "movie.mkv").write_bytes(b"x")
+        (tmp_path / "movie2.thing.subgen.srt").write_text("1\n")
+        assert d.scan(str(tmp_path)) == 1  # movie.mkv must NOT be skipped
+
+    def test_exact_stem_subgen_still_skips(self, tmp_path):
+        d = make_dispatcher(config=make_config(batch_scan_limit=0))
+        (tmp_path / "movie.mkv").write_bytes(b"x")
+        (tmp_path / "movie.thing.subgen.srt").write_text("1\n")
+        assert d.scan(str(tmp_path)) == 0
+
+
+class TestPoisonedTaskHandling:
+    def test_unexpected_error_recorded_in_history(self):
+        """The run()-loop guard must not silently drop tasks: an unexpected
+        exception lands in history as failed (module contract), not removed
+        without a trace."""
+        d = make_dispatcher()
+        d.servicer.transcribe_side_effect = KeyError("boom")
+        d.queue.enqueue(Task(file_path="/media/movie.mkv"))
+
+        d.start()
+        deadline = time.time() + 5
+        while time.time() < deadline and not d.queue.history():
+            time.sleep(0.05)
+        d.stop()
+
+        assert d.queue.history(), "task vanished without a history entry"
+        entry = d.queue.history()[-1]
+        assert entry["status"] == "failed"
+        assert "boom" in entry["error"]
+        assert d.queue.is_idle()
