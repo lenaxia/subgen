@@ -6,6 +6,7 @@ Tests the full gRPC client -> server flow with real gRPC connections.
 
 import time
 from concurrent import futures
+from unittest.mock import Mock, patch
 
 import grpc
 import pytest
@@ -26,6 +27,22 @@ def test_config():
         version="1.0.0-test",
     )
     return config
+
+
+@pytest.fixture(autouse=True)
+def deterministic_rss():
+    """Pin HealthCheck's RSS reading.
+
+    HealthCheck compares REAL process memory to memory_threshold_mb. When
+    these tests run after real-model transcription tests (e.g. skip E2E),
+    the resident ctranslate2 weights push ambient RSS over the threshold
+    and the HEALTHY assertions flake. Patch psutil so the tests exercise
+    the threshold logic with a known value.
+    """
+    fixed_rss = Mock()
+    fixed_rss.memory_info.return_value = Mock(rss=500 * 1024 * 1024)
+    with patch("grpc_server.service.psutil.Process", return_value=fixed_rss):
+        yield
 
 
 @pytest.fixture

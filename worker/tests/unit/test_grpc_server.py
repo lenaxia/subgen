@@ -59,6 +59,11 @@ def servicer(mock_config):
     """
     mock_config.model_lifecycle.unload_on_idle = None
     svc = TranscriptionServicer(mock_config)
+    # Deterministic RSS: HealthCheck compares REAL process memory against
+    # memory_threshold_mb. In combined runs the real-model integration tests
+    # keep ctranslate2 weights resident, and ambient RSS crossing the
+    # threshold flaked the HEALTHY assertion. Patch psutil so these tests
+    # exercise the threshold logic, not ambient memory.
     # MagicMock (not Mock): the service uses `with model_manager.lock():`
     # around engine.model assignments, which requires the context-manager
     # protocol plain Mock does not implement.
@@ -70,7 +75,10 @@ def servicer(mock_config):
     mock_config.skip.get_target_languages.return_value = []
     mock_config.skip.get_preferred_audio_languages.return_value = []
     mock_config.skip.transcribe_preferred = False
-    return svc
+    fixed_rss = Mock()
+    fixed_rss.memory_info.return_value = Mock(rss=500 * 1024 * 1024)
+    with patch("grpc_server.service.psutil.Process", return_value=fixed_rss):
+        yield svc
 
 
 @pytest.fixture
